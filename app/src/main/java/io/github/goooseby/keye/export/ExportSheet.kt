@@ -18,9 +18,9 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import io.github.goooseby.keye.app.KeyeViewModel
-import io.github.goooseby.keye.data.model.StudyMaterial
-import io.github.goooseby.keye.domain.reading.selectExportPages
+import io.github.goooseby.keye.KeyeViewModel
+import io.github.goooseby.keye.data.StudyMaterial
+import io.github.goooseby.keye.domain.selectExportPages
 import io.github.goooseby.keye.ui.components.AppIcon
 import io.github.goooseby.keye.ui.components.PreferenceRow
 import io.github.goooseby.keye.ui.components.SheetHeading

@@ -1,4 +1,4 @@
-package io.github.goooseby.keye.ui.acquire
+package io.github.goooseby.keye.ui
 
 import android.webkit.CookieManager
 import androidx.compose.animation.*
@@ -18,14 +18,14 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.unit.dp
-import io.github.goooseby.keye.app.KeyeViewModel
-import io.github.goooseby.keye.app.UiState
-import io.github.goooseby.keye.data.model.ScheduleEntry
-import io.github.goooseby.keye.data.school.SchoolApi
-import io.github.goooseby.keye.data.school.SchoolConnection
-import io.github.goooseby.keye.data.school.isInProgress
-import io.github.goooseby.keye.data.school.semesterStart
-import io.github.goooseby.keye.domain.classroom.ClassroomStage
+import io.github.goooseby.keye.KeyeViewModel
+import io.github.goooseby.keye.UiState
+import io.github.goooseby.keye.data.ScheduleEntry
+import io.github.goooseby.keye.domain.ClassroomStage
+import io.github.goooseby.keye.domain.isInProgress
+import io.github.goooseby.keye.domain.semesterStart
+import io.github.goooseby.keye.network.SchoolApi
+import io.github.goooseby.keye.network.SchoolConnection
 import io.github.goooseby.keye.ui.components.AppIcon
 import io.github.goooseby.keye.ui.components.EmptyState
 import io.github.goooseby.keye.ui.components.PreferenceRow

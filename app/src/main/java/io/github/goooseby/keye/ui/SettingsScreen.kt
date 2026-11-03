@@ -1,4 +1,4 @@
-package io.github.goooseby.keye.ui.settings
+package io.github.goooseby.keye.ui
 
 import android.content.Intent
 import android.net.Uri
@@ -16,12 +16,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import io.github.goooseby.keye.app.KeyeViewModel
-import io.github.goooseby.keye.app.UiState
-import io.github.goooseby.keye.data.school.SchoolApi
-import io.github.goooseby.keye.data.school.SchoolConnection
-import io.github.goooseby.keye.data.school.schoolConnectionLabel
+import io.github.goooseby.keye.KeyeViewModel
+import io.github.goooseby.keye.UiState
 import io.github.goooseby.keye.export.ExportLocationRow
+import io.github.goooseby.keye.network.SchoolApi
+import io.github.goooseby.keye.network.SchoolConnection
+import io.github.goooseby.keye.network.schoolConnectionLabel
 import io.github.goooseby.keye.ui.components.AppIcon
 import io.github.goooseby.keye.ui.components.IconBadge
 import io.github.goooseby.keye.ui.components.PreferenceRow

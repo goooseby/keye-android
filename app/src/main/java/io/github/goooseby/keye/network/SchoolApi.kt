@@ -1,10 +1,11 @@
-package io.github.goooseby.keye.data.school
+package io.github.goooseby.keye.network
 
 import android.net.Uri
 import android.util.Base64
-import io.github.goooseby.keye.data.model.ScheduleEntry
-import io.github.goooseby.keye.domain.classroom.ClassroomPage
-import io.github.goooseby.keye.domain.classroom.classroomPageKey
+import io.github.goooseby.keye.data.ScheduleEntry
+import io.github.goooseby.keye.domain.ClassroomPage
+import io.github.goooseby.keye.domain.classroomPageKey
+import io.github.goooseby.keye.domain.scheduleTimestamp
 import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
 import java.net.Proxy

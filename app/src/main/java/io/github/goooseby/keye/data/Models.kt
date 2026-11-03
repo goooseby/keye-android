@@ -1,5 +1,4 @@
-package io.github.goooseby.keye.data.model
-
+package io.github.goooseby.keye.data
 
 import java.util.UUID
 import org.json.JSONArray

@@ -1,14 +1,14 @@
 package io.github.goooseby.keye
 
-import io.github.goooseby.keye.data.model.PageFile
-import io.github.goooseby.keye.data.model.StudyMaterial
-import io.github.goooseby.keye.domain.classroom.ClassroomPage
-import io.github.goooseby.keye.domain.classroom.classroomAppendTarget
-import io.github.goooseby.keye.domain.classroom.classroomPageKey
-import io.github.goooseby.keye.domain.classroom.classroomRetryMillis
-import io.github.goooseby.keye.domain.classroom.classroomUnseenPages
-import io.github.goooseby.keye.domain.classroom.pendingClassroomPages
-import io.github.goooseby.keye.domain.reading.selectExportPages
+import io.github.goooseby.keye.data.PageFile
+import io.github.goooseby.keye.data.StudyMaterial
+import io.github.goooseby.keye.domain.ClassroomPage
+import io.github.goooseby.keye.domain.classroomAppendTarget
+import io.github.goooseby.keye.domain.classroomPageKey
+import io.github.goooseby.keye.domain.classroomRetryMillis
+import io.github.goooseby.keye.domain.classroomUnseenPages
+import io.github.goooseby.keye.domain.pendingClassroomPages
+import io.github.goooseby.keye.domain.selectExportPages
 import org.junit.Assert.*
 import org.junit.Test
 

@@ -1,6 +1,5 @@
 package io.github.goooseby.keye.ui.components
 
-
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable

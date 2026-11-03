@@ -1,4 +1,4 @@
-package io.github.goooseby.keye.ui.tasks
+package io.github.goooseby.keye.ui
 
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
@@ -13,9 +13,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import io.github.goooseby.keye.app.KeyeViewModel
-import io.github.goooseby.keye.data.model.TaskRecord
-import io.github.goooseby.keye.data.model.taskQueueOrder
+import io.github.goooseby.keye.KeyeViewModel
+import io.github.goooseby.keye.data.TaskRecord
+import io.github.goooseby.keye.data.taskQueueOrder
 import io.github.goooseby.keye.ui.components.AppIcon
 import io.github.goooseby.keye.ui.components.EmptyState
 import io.github.goooseby.keye.ui.components.IconBadge

@@ -9,7 +9,7 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.*
 import androidx.compose.ui.platform.LocalDensity
-import io.github.goooseby.keye.data.model.StudyMaterial
+import io.github.goooseby.keye.data.StudyMaterial
 import java.io.File
 import kotlin.math.abs
 

@@ -1,4 +1,4 @@
-package io.github.goooseby.keye.data.media
+package io.github.goooseby.keye.data
 
 import android.content.Context
 import android.graphics.Bitmap
@@ -12,9 +12,6 @@ import android.media.ExifInterface
 import android.net.Uri
 import android.os.ParcelFileDescriptor
 import android.provider.OpenableColumns
-import io.github.goooseby.keye.data.model.PageFile
-import io.github.goooseby.keye.data.model.StudyMaterial
-import io.github.goooseby.keye.data.model.newId
 import java.io.File
 import java.io.FileOutputStream
 import java.io.OutputStream

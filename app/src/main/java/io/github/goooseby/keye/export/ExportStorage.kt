@@ -8,7 +8,7 @@ import android.os.Build
 import android.provider.DocumentsContract
 import android.provider.MediaStore
 import androidx.core.content.FileProvider
-import io.github.goooseby.keye.data.model.StudyMaterial
+import io.github.goooseby.keye.data.StudyMaterial
 import java.io.File
 
 // Export ranges are independent of reading preferences and original documents.

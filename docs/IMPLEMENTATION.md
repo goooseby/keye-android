@@ -2,7 +2,9 @@
 
 ## 代码组织
 
-生产源码仅将 MainActivity 留在根包。app 管理应用状态与任务编排；data/model、data/local、data/media、data/school 分别承载数据模型、SQLite、媒体与学校接口；domain 保存页面选择与跟看规则；ui 按获取、课程、阅读、跟看、设置、任务、通用控件与主题划分。export 和 update 按完整功能聚合，避免把强相关的面板、存储和流程拆散。目录和 Kotlin 包名一致，跨包使用显式导入，internal 可见性仍限定在当前模块。
+MainActivity 和 KeyeViewModel 放在根包，分别负责导航、应用状态与任务编排。data 聚合数据模型、SQLite 和媒体处理，network 管理学校请求与登录状态，domain 保存页面选择、跟看和课表时间规则。普通页面直接放在 ui，只有阅读器和通用控件分为 ui/reader、ui/components；主题与通用控件放在一起。export 和 update 按完整功能聚合。
+
+目录服务于查找和协作：经常一起修改、职责相近的文件放在一起，不为尚未增长的功能预建层级。保持单个模块，目录与 Kotlin 包名一致，跨包使用显式导入。
 
 Android applicationId 保持 io.github.goooseby.keye，数据库名称、版本、JSON 字段、SharedPreferences、FileProvider authority 和更新 Intent action 均保持稳定。Manifest 中广播接收器路径与 update 包同步；测试和 Debug 演示入口使用实际生产包导入。源码目录说明见 README。
 

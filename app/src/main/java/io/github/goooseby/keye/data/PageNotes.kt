@@ -1,5 +1,4 @@
-package io.github.goooseby.keye.data.media
-
+package io.github.goooseby.keye.data
 
 import android.graphics.Bitmap
 import android.graphics.Canvas

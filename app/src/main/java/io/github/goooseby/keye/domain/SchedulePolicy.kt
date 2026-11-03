@@ -1,6 +1,6 @@
-package io.github.goooseby.keye.data.school
+package io.github.goooseby.keye.domain
 
-import io.github.goooseby.keye.data.model.ScheduleEntry
+import io.github.goooseby.keye.data.ScheduleEntry
 import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate

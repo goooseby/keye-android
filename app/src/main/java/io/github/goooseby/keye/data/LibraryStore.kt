@@ -1,12 +1,8 @@
-package io.github.goooseby.keye.data.local
+package io.github.goooseby.keye.data
 
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
-import io.github.goooseby.keye.data.model.AppSettings
-import io.github.goooseby.keye.data.model.Course
-import io.github.goooseby.keye.data.model.StudyMaterial
-import io.github.goooseby.keye.data.model.TaskRecord
 import org.json.JSONObject
 
 class LibraryStore private constructor(context: Context) : SQLiteOpenHelper(context, "keye-library.sqlite", null, 1) {

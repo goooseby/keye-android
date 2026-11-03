@@ -1,4 +1,4 @@
-package io.github.goooseby.keye.ui.acquire
+package io.github.goooseby.keye.ui
 
 import android.webkit.*
 import androidx.activity.compose.BackHandler
@@ -11,8 +11,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import io.github.goooseby.keye.app.KeyeViewModel
-import io.github.goooseby.keye.data.school.SchoolApi
+import io.github.goooseby.keye.KeyeViewModel
+import io.github.goooseby.keye.network.SchoolApi
 import io.github.goooseby.keye.ui.components.AppIcon
 import io.github.goooseby.keye.ui.components.EmptyState
 import kotlinx.coroutines.delay

@@ -1,4 +1,4 @@
-package io.github.goooseby.keye.ui.classroom
+package io.github.goooseby.keye.ui.reader
 
 import android.app.Activity
 import android.content.pm.ActivityInfo
@@ -29,15 +29,15 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import io.github.goooseby.keye.app.KeyeViewModel
-import io.github.goooseby.keye.app.UiState
-import io.github.goooseby.keye.data.model.StudyMaterial
-import io.github.goooseby.keye.domain.classroom.ClassroomSession
-import io.github.goooseby.keye.domain.classroom.ClassroomStage
-import io.github.goooseby.keye.domain.classroom.classroomAppendTarget
-import io.github.goooseby.keye.domain.classroom.classroomUnseenPages
-import io.github.goooseby.keye.domain.reading.retainedPageIndices
-import io.github.goooseby.keye.domain.reading.visiblePositionForPage
+import io.github.goooseby.keye.KeyeViewModel
+import io.github.goooseby.keye.UiState
+import io.github.goooseby.keye.data.StudyMaterial
+import io.github.goooseby.keye.domain.ClassroomSession
+import io.github.goooseby.keye.domain.ClassroomStage
+import io.github.goooseby.keye.domain.classroomAppendTarget
+import io.github.goooseby.keye.domain.classroomUnseenPages
+import io.github.goooseby.keye.domain.retainedPageIndices
+import io.github.goooseby.keye.domain.visiblePositionForPage
 import io.github.goooseby.keye.export.ExportFeedback
 import io.github.goooseby.keye.export.ExportSheet
 import io.github.goooseby.keye.ui.components.AppIcon
@@ -47,8 +47,6 @@ import io.github.goooseby.keye.ui.components.PillTabs
 import io.github.goooseby.keye.ui.components.PreferenceRow
 import io.github.goooseby.keye.ui.components.SheetHeading
 import io.github.goooseby.keye.ui.components.StatusPill
-import io.github.goooseby.keye.ui.reader.FullscreenReaderControls
-import io.github.goooseby.keye.ui.reader.ReaderCanvas
 import java.io.File
 import java.time.Instant
 import java.time.ZoneId

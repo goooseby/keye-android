@@ -1,5 +1,4 @@
-package io.github.goooseby.keye.data.school
-
+package io.github.goooseby.keye.network
 
 import java.net.URI
 

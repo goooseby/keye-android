@@ -1,6 +1,5 @@
 package io.github.goooseby.keye.update
 
-
 import java.net.URI
 import java.time.LocalDate
 

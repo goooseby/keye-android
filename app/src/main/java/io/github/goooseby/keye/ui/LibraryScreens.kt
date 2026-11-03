@@ -1,4 +1,4 @@
-package io.github.goooseby.keye.ui.library
+package io.github.goooseby.keye.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
@@ -31,10 +31,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import io.github.goooseby.keye.app.KeyeViewModel
-import io.github.goooseby.keye.app.UiState
-import io.github.goooseby.keye.data.model.Course
-import io.github.goooseby.keye.data.model.StudyMaterial
+import io.github.goooseby.keye.KeyeViewModel
+import io.github.goooseby.keye.UiState
+import io.github.goooseby.keye.data.Course
+import io.github.goooseby.keye.data.StudyMaterial
 import io.github.goooseby.keye.ui.components.AppIcon
 import io.github.goooseby.keye.ui.components.EmptyState
 import io.github.goooseby.keye.ui.components.IconBadge

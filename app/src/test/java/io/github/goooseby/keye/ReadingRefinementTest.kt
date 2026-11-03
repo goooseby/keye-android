@@ -1,13 +1,13 @@
 package io.github.goooseby.keye
 
-import io.github.goooseby.keye.data.model.PageFile
-import io.github.goooseby.keye.data.model.ScheduleEntry
-import io.github.goooseby.keye.data.model.StudyMaterial
-import io.github.goooseby.keye.data.school.isInProgress
-import io.github.goooseby.keye.data.school.scheduleTimestamp
-import io.github.goooseby.keye.data.school.semesterStart
-import io.github.goooseby.keye.domain.classroom.ClassroomPage
-import io.github.goooseby.keye.domain.classroom.insertClassroomPage
+import io.github.goooseby.keye.data.PageFile
+import io.github.goooseby.keye.data.ScheduleEntry
+import io.github.goooseby.keye.data.StudyMaterial
+import io.github.goooseby.keye.domain.ClassroomPage
+import io.github.goooseby.keye.domain.insertClassroomPage
+import io.github.goooseby.keye.domain.isInProgress
+import io.github.goooseby.keye.domain.scheduleTimestamp
+import io.github.goooseby.keye.domain.semesterStart
 import java.time.LocalDate
 import org.junit.Assert.*
 import org.junit.Test

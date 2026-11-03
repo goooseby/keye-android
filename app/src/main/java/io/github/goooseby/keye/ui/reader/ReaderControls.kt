@@ -16,7 +16,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.goooseby.keye.ui.components.AppIcon
 import io.github.goooseby.keye.ui.components.SectionLabel
-import io.github.goooseby.keye.ui.theme.featureColor
+import io.github.goooseby.keye.ui.components.featureColor
 import kotlin.math.roundToInt
 
 /** Controls stay above the page: showing them never changes the slide viewport. */

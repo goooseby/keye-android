@@ -11,20 +11,18 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import io.github.goooseby.keye.app.KeyeViewModel
-import io.github.goooseby.keye.app.UiState
-import io.github.goooseby.keye.data.model.Course
-import io.github.goooseby.keye.data.model.ScheduleEntry
-import io.github.goooseby.keye.data.model.StudyMaterial
-import io.github.goooseby.keye.data.model.TaskRecord
-import io.github.goooseby.keye.ui.acquire.AcquireScreen
+import io.github.goooseby.keye.data.Course
+import io.github.goooseby.keye.data.ScheduleEntry
+import io.github.goooseby.keye.data.StudyMaterial
+import io.github.goooseby.keye.data.TaskRecord
+import io.github.goooseby.keye.ui.AcquireScreen
+import io.github.goooseby.keye.ui.CourseScreen
+import io.github.goooseby.keye.ui.LibraryScreen
+import io.github.goooseby.keye.ui.SettingsScreen
+import io.github.goooseby.keye.ui.TasksScreen
 import io.github.goooseby.keye.ui.components.AppIcon
-import io.github.goooseby.keye.ui.library.CourseScreen
-import io.github.goooseby.keye.ui.library.LibraryScreen
+import io.github.goooseby.keye.ui.components.KeyeTheme
 import io.github.goooseby.keye.ui.reader.ReaderScreen
-import io.github.goooseby.keye.ui.settings.SettingsScreen
-import io.github.goooseby.keye.ui.tasks.TasksScreen
-import io.github.goooseby.keye.ui.theme.KeyeTheme
 import java.io.File
 
 /** Debug-only visual fixtures; this activity is absent from release builds. */

@@ -1,6 +1,6 @@
-package io.github.goooseby.keye.domain.reading
+package io.github.goooseby.keye.domain
 
-import io.github.goooseby.keye.data.model.StudyMaterial
+import io.github.goooseby.keye.data.StudyMaterial
 
 /** Original page numbers are persistent identities; hiding pages never renumbers them. */
 fun retainedPageIndices(count: Int,removed: Set<Int>): List<Int> = (0 until count).filter {it+1 !in removed}

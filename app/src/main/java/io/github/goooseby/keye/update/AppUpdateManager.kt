@@ -1,6 +1,5 @@
 package io.github.goooseby.keye.update
 
-
 import android.app.DownloadManager
 import android.app.NotificationManager
 import android.content.Context

@@ -1,10 +1,10 @@
-package io.github.goooseby.keye.domain.classroom
+package io.github.goooseby.keye.domain
 
-import io.github.goooseby.keye.data.model.PageFile
-import io.github.goooseby.keye.data.model.ScheduleEntry
-import io.github.goooseby.keye.data.model.StudyMaterial
-import io.github.goooseby.keye.data.school.SchoolApi
-import io.github.goooseby.keye.data.school.SchoolAuth
+import io.github.goooseby.keye.data.PageFile
+import io.github.goooseby.keye.data.ScheduleEntry
+import io.github.goooseby.keye.data.StudyMaterial
+import io.github.goooseby.keye.network.SchoolApi
+import io.github.goooseby.keye.network.SchoolAuth
 import java.net.URI
 import java.net.URLDecoder
 import java.security.MessageDigest

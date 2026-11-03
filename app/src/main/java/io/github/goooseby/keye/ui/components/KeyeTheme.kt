@@ -1,5 +1,4 @@
-package io.github.goooseby.keye.ui.theme
-
+package io.github.goooseby.keye.ui.components
 
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
