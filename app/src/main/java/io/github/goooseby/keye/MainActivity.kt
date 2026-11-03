@@ -22,13 +22,37 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
-import kotlinx.coroutines.delay
+import androidx.lifecycle.viewmodel.compose.viewModel
+import io.github.goooseby.keye.app.KeyeViewModel
+import io.github.goooseby.keye.data.model.Course
+import io.github.goooseby.keye.data.model.ScheduleEntry
+import io.github.goooseby.keye.data.school.SchoolApi
+import io.github.goooseby.keye.domain.classroom.ClassroomStage
+import io.github.goooseby.keye.export.ExportFeedback
+import io.github.goooseby.keye.export.ExportSheet
+import io.github.goooseby.keye.ui.acquire.AcquireScreen
+import io.github.goooseby.keye.ui.acquire.SchoolLoginScreen
+import io.github.goooseby.keye.ui.classroom.ClassroomScreen
+import io.github.goooseby.keye.ui.components.AppIcon
+import io.github.goooseby.keye.ui.components.EmptyState
+import io.github.goooseby.keye.ui.components.PreferenceRow
+import io.github.goooseby.keye.ui.components.SheetHeading
+import io.github.goooseby.keye.ui.library.CourseScreen
+import io.github.goooseby.keye.ui.library.LibraryScreen
+import io.github.goooseby.keye.ui.reader.ReaderScreen
+import io.github.goooseby.keye.ui.settings.SettingsScreen
+import io.github.goooseby.keye.ui.tasks.TasksScreen
+import io.github.goooseby.keye.ui.theme.KeyeTheme
+import io.github.goooseby.keye.update.AppUpdateHost
+import io.github.goooseby.keye.update.AppUpdateViewModel
+import io.github.goooseby.keye.update.UPDATE_ACTION
+import io.github.goooseby.keye.update.UpdateDownloadStage
 import java.io.File
+import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {

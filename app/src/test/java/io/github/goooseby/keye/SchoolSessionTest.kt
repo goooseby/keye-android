@@ -1,5 +1,7 @@
 package io.github.goooseby.keye
 
+import io.github.goooseby.keye.data.school.hasSchoolLoginCookie
+import io.github.goooseby.keye.data.school.isSchoolAuthenticationFailure
 import org.junit.Assert.*
 import org.junit.Test
 

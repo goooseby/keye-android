@@ -61,3 +61,36 @@ docs/           产品、交互与开发说明
 - [应用更新、正式签名与发布](docs/UPDATES.md)
 
 下载和导出目前随应用进程运行，不提供持久后台恢复。部分页／合并导出使用图片型 PDF；完整导出未修改的单份 PDF 时优先保留原件。当前没有 OCR、全文搜索、笔迹批注或云同步。
+
+## 源码结构
+
+源码根目录为 `app/src/main/java/io/github/goooseby/keye/`，按职责组织，包路径与目录一致：
+
+```text
+keye/
+├── MainActivity.kt       # 应用入口与导航
+├── app/                  # 应用状态、课件与任务调度
+├── data/
+│   ├── model/            # 持久数据模型与显式 JSON 编解码
+│   ├── local/            # SQLite 本机资料库
+│   ├── media/            # 图片、PDF 渲染与媒体文件
+│   └── school/           # 学校网络接口、登录状态与课表时间
+├── domain/
+│   ├── reading/          # 页面选择、移除和导出范围规则
+│   └── classroom/        # 跟看会话、页面去重与补页规则
+├── ui/
+│   ├── acquire/          # 课表获取与学校登录
+│   ├── library/          # 课程和课件列表
+│   ├── reader/           # 阅读画布与播放器控件
+│   ├── classroom/        # 课堂跟看界面
+│   ├── settings/         # 我的与设置
+│   ├── tasks/            # 下载任务界面
+│   ├── components/       # 通用控件与矢量图标
+│   └── theme/            # 配色和字体
+├── export/               # PDF 导出、保存位置与操作面板
+└── update/               # GitHub 更新、后台下载与安装交互
+```
+
+保持单个 Android 模块；下载任务调度集中在应用状态层，学校请求和媒体处理分别由数据层负责。Debug 演示入口与单元测试位于各自 source set，不进入正式包。
+
+Release 默认开启 R8 代码优化、混淆和资源压缩，Debug 保持便于调试。正式发布工作流使用同一套 Gradle 配置，映射文件随构建归档；详见 [更新与发布](docs/UPDATES.md)。

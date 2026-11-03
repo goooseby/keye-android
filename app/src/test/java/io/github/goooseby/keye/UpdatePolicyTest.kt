@@ -1,8 +1,12 @@
 package io.github.goooseby.keye
 
+import io.github.goooseby.keye.update.StableVersion
+import io.github.goooseby.keye.update.matchingUpdateSigners
+import io.github.goooseby.keye.update.shouldCheckUpdateToday
+import io.github.goooseby.keye.update.validUpdateUrl
+import java.time.LocalDate
 import org.junit.Assert.*
 import org.junit.Test
-import java.time.LocalDate
 
 class UpdatePolicyTest {
     @Test fun versionsCompareNumericallyAndOnlyStableTagsAreAccepted() {

@@ -69,6 +69,18 @@ Android 8 起通过系统“允许此来源安装应用”授权，应用只在�
 
 本机签名构建时通过环境变量设置 `KEYE_KEYSTORE_PATH`、`KEYE_KEYSTORE_PASSWORD`、`KEYE_KEY_ALIAS`、`KEYE_KEY_PASSWORD` 后执行 `:app:assembleRelease`。没有签名配置时产生的 unsigned APK 不能发布；工作流不会退回 Debug 签名。
 
+## Release 优化与问题定位
+
+app/build.gradle.kts 的 release 构建启用 isMinifyEnabled 与 isShrinkResources，采用 proguard-android-optimize.txt 和 app/proguard-rules.pro。本机和 Actions 的 assembleRelease 都自动执行 R8，无需在工作流另写混淆命令。Debug 不压缩，便于日常调试。
+
+自定义保留规则仅针对 AndroidViewModelFactory 反射创建的两个 Application 构造函数，不整包保留类；页面数据使用显式 JSON 字段，不依赖反射序列化。Manifest 组件、Compose 和 AndroidX 的规则由 Android 构建工具及依赖提供。新增反射、JNI 或反射式序列化时，需同步检查精确的保留规则并验证优化后的包。
+
+Actions 归档 app/build/outputs/mapping/release，文件名包含构建提交 SHA，保存 90 天，缺少产物时构建失败；发布前也要求 mapping.txt 非空。每次正式发布后下载并长期保存对应映射，GitHub 构建附件到期后不再可取。排查混淆栈时用同一 APK 对应的 mapping.txt 配合 Android SDK Retrace，不能拿另一次构建的映射替代。映射不包含签名私钥，也不作为客户端更新附件。
+
+混淆缩短类与成员名并配合裁剪减少包体，不能代替加密或凭据保护；公开源码仍按公开仓库管理。
+
+参考：[Android 官方 R8 配置](https://developer.android.com/topic/performance/app-optimization/enable-app-optimization)、[精确保留规则](https://developer.android.com/topic/performance/app-optimization/keep-rules-overview)。
+
 ## 检查场景
 
 - 同日重复启动、失败后重启、跨日启动、日期回拨，以及手动检查绕过每日限制。

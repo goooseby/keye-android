@@ -12,12 +12,20 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.*
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
-import org.json.JSONArray
-import org.json.JSONObject
+import io.github.goooseby.keye.app.KeyeViewModel
+import io.github.goooseby.keye.data.model.ScheduleEntry
+import io.github.goooseby.keye.data.model.newId
+import io.github.goooseby.keye.domain.classroom.ClassroomPage
+import io.github.goooseby.keye.domain.classroom.ClassroomPageSource
+import io.github.goooseby.keye.domain.classroom.classroomPageKey
+import io.github.goooseby.keye.ui.classroom.ClassroomScreen
+import io.github.goooseby.keye.ui.theme.KeyeTheme
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.time.LocalDate
 import java.util.concurrent.atomic.AtomicInteger
+import org.json.JSONArray
+import org.json.JSONObject
 
 /** Debug-only controlled feed. No school cookies, endpoints or user data are used. */
 class ClassroomDemoActivity: ComponentActivity() {

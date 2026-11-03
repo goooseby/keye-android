@@ -1,5 +1,12 @@
 # 实现说明
 
+## 代码组织
+
+生产源码仅将 MainActivity 留在根包。app 管理应用状态与任务编排；data/model、data/local、data/media、data/school 分别承载数据模型、SQLite、媒体与学校接口；domain 保存页面选择与跟看规则；ui 按获取、课程、阅读、跟看、设置、任务、通用控件与主题划分。export 和 update 按完整功能聚合，避免把强相关的面板、存储和流程拆散。目录和 Kotlin 包名一致，跨包使用显式导入，internal 可见性仍限定在当前模块。
+
+Android applicationId 保持 io.github.goooseby.keye，数据库名称、版本、JSON 字段、SharedPreferences、FileProvider authority 和更新 Intent action 均保持稳定。Manifest 中广播接收器路径与 update 包同步；测试和 Debug 演示入口使用实际生产包导入。源码目录说明见 README。
+
+
 ## 阅读与入口
 
 一级导航为课程、获取、我的。下载管理从获取顶栏及我的进入。课程默认打开最近阅读，支持搜索与全部课程；课件元数据操作与阅读进度分别保存，最近阅读按 readAt 排序。
