@@ -44,7 +44,7 @@ fun ClassroomScreen(session: ClassroomSession,material: StudyMaterial?,state: Ui
     val activity=context as Activity
     val owner=LocalLifecycleOwner.current
     var following by rememberSaveable(session.entry.id) {mutableStateOf(true)}
-    var seenCount by rememberSaveable(session.entry.id) {mutableIntStateOf(material?.pages?.size ?: 0)}
+    var seenCount by rememberSaveable(session.entry.id) {mutableIntStateOf(session.remoteCount)}
     var fullscreen by rememberSaveable {mutableStateOf(false)}
     var chrome by rememberSaveable {mutableStateOf(true)}
     var controlTick by remember {mutableIntStateOf(0)}
@@ -53,12 +53,15 @@ fun ClassroomScreen(session: ClassroomSession,material: StudyMaterial?,state: Ui
     var resetToken by remember {mutableIntStateOf(0)}
     var panel by remember {mutableStateOf<String?>(null)}
     var endConfirmation by remember {mutableStateOf(false)}
+    var noteSnapshot by remember {mutableStateOf<Pair<StudyMaterial,Int>?>(null)}
     var exportSnapshot by remember {mutableStateOf<StudyMaterial?>(null)}
+    var imageSaveSnapshot by remember {mutableStateOf<StudyMaterial?>(null)}
     var imageSavePage by rememberSaveable {mutableIntStateOf(1)}
     val originalIndices=remember(material?.pages,material?.excluded) {material?.let {retainedPageIndices(it.pages.size,it.excluded)} ?: emptyList()}
     val pages=originalIndices.map {material!!.pages[it]}
     val count=pages.size
     val latestCount by rememberUpdatedState(count)
+    val latestMaterial by rememberUpdatedState(material)
     val latestIndices by rememberUpdatedState(originalIndices)
     val pager=rememberPagerState(initialPage=if(originalIndices.isEmpty()) 0 else visiblePositionForPage(originalIndices,(material?.lastPage ?: 1)-1),pageCount={count.coerceAtLeast(1)})
     val current=pager.currentPage.coerceIn(0,(count-1).coerceAtLeast(0))
@@ -67,14 +70,21 @@ fun ClassroomScreen(session: ClassroomSession,material: StudyMaterial?,state: Ui
     val scope=rememberCoroutineScope()
     val snackbar=remember {SnackbarHostState()}
     val saveLocation=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("image/png")) {uri ->
-        if(uri!=null && material!=null) model.savePageImage(material.id,imageSavePage,uri)
+        if(uri!=null && material!=null) model.savePageImage(material.id,imageSavePage,uri,imageSaveSnapshot)
+    }
+    fun saveCurrentPage() {
+        if(material!=null && count>0) {
+            imageSavePage=currentPage;imageSaveSnapshot=material;controlTick++
+            if(Build.VERSION.SDK_INT>=29) model.savePageImage(material.id,currentPage,snapshot=material)
+            else saveLocation.launch("${material.title}_第${currentPage}页.png")
+        }
     }
     fun goTo(page: Int) {
         following=false;controlTick++;resetToken++
         scope.launch {pager.animateScrollToPage(page.coerceIn(0,(count-1).coerceAtLeast(0)))}
     }
     fun followLatest() {
-        following=true;seenCount=count;resetToken++;controlTick++
+        following=true;seenCount=session.remoteCount;resetToken++;controlTick++
         scope.launch {if(count>0) pager.scrollToPage(count-1)}
     }
     fun setFull(value: Boolean) {fullscreen=value;chrome=true;panel=null;resetToken++;zoomed=false;controlTick++}
@@ -104,19 +114,24 @@ fun ClassroomScreen(session: ClassroomSession,material: StudyMaterial?,state: Ui
         if(count>0) {
             val target=classroomAppendTarget(following,pager.currentPage,count)
             if(following || pager.currentPage>=count) {resetToken++;pager.scrollToPage(target)}
-            if(following) seenCount=count
+            if(following) seenCount=session.remoteCount
         }
     }
-    LaunchedEffect(current,count) {if(count>0 && current==count-1) seenCount=count}
+    LaunchedEffect(current,count) {if(count>0 && current==count-1) seenCount=session.remoteCount}
     LaunchedEffect(session.materialId) {
         snapshotFlow {pager.settledPage to latestCount}.distinctUntilChanged().debounce(250).collect {(page,_) ->
             val id=session.materialId
-            if(id!=null) latestIndices.getOrNull(page)?.let {model.lastPage(id,it+1)}
+            if(id!=null) latestIndices.getOrNull(page)?.let {model.lastPage(id,it+1,source=latestMaterial?.pages?.getOrNull(it)?.source)}
         }
     }
     LaunchedEffect(fullscreen,chrome,controlTick,scrubbing,panel) {
         val accessibility=context.getSystemService(android.view.accessibility.AccessibilityManager::class.java)
         if(fullscreen&&chrome&&!scrubbing&&panel==null&&accessibility?.isTouchExplorationEnabled!=true) {delay(3000);chrome=false}
+    }
+    LaunchedEffect(state.exportState?.result?.uri,state.exportState?.failed) {
+        val output=state.exportState
+        if(fullscreen && output?.result?.mime=="image/png") snackbar.showSnackbar("当前页已保存到 ${output.result.location}")
+        else if(fullscreen && output?.failed==true) snackbar.showSnackbar(output.message)
     }
     LaunchedEffect(state.notice) {state.notice?.let {snackbar.showSnackbar(it);if(model.state.value.notice==it) model.notice(null)}}
     Column(Modifier.fillMaxSize().background(if(fullscreen) Color.Black else MaterialTheme.colorScheme.surfaceContainer)) {
@@ -161,8 +176,8 @@ fun ClassroomScreen(session: ClassroomSession,material: StudyMaterial?,state: Ui
             if(fullscreen && count>0 && material!=null) {
                 FullscreenReaderControls(chrome,"${if(following) "跟随中" else "回看中"} · ${session.entry.title}",current,currentPage,material.pages.size,count,currentPage in material.bookmarks,zoomed,
                     {setFull(false)},{goTo(current-1)},{goTo(current+1)},{goTo(it)},{scrubbing=it;if(it) following=false;controlTick++},
-                    {model.bookmark(material.id,currentPage);controlTick++},{resetToken++;controlTick++})
-                if(!following) FilledTonalButton(onClick={followLatest()},modifier=Modifier.align(Alignment.BottomEnd).padding(end=24.dp,bottom=108.dp)) {AppIcon("live",modifier=Modifier.size(18.dp));Spacer(Modifier.width(8.dp));Text("回到最新"+classroomUnseenPages(count,seenCount).takeIf {it>0}?.let {" · +$it"}.orEmpty())}
+                    {model.bookmark(material.id,currentPage,material.pages.getOrNull(currentPage-1)?.source);controlTick++},{resetToken++;controlTick++},{saveCurrentPage()},saveBusy=state.exportState?.running==true)
+                if(!following) FilledTonalButton(onClick={followLatest()},modifier=Modifier.align(Alignment.BottomEnd).padding(end=24.dp,bottom=108.dp)) {AppIcon("live",modifier=Modifier.size(18.dp));Spacer(Modifier.width(8.dp));Text("回到最新"+classroomUnseenPages(session.remoteCount,seenCount).takeIf {it>0}?.let {" · +$it"}.orEmpty())}
             }
             if(!fullscreen && state.exportState!=null) Box(Modifier.align(Alignment.BottomCenter)) {ExportFeedback(state.exportState,model,session.materialId ?: "classroom")}
             SnackbarHost(snackbar,Modifier.align(Alignment.TopCenter).padding(12.dp))
@@ -176,16 +191,16 @@ fun ClassroomScreen(session: ClassroomSession,material: StudyMaterial?,state: Ui
                     Spacer(Modifier.weight(1f))
                     FilledTonalButton(onClick={if(following) following=false else followLatest()},enabled=count>0,contentPadding=PaddingValues(horizontal=12.dp,vertical=8.dp)) {
                         AppIcon(if(following) "live" else "next",modifier=Modifier.size(17.dp));Spacer(Modifier.width(6.dp))
-                        val unseen=classroomUnseenPages(count,seenCount)
+                        val unseen=classroomUnseenPages(session.remoteCount,seenCount)
                         Text(if(following) "正在跟随" else if(unseen>0) "最新 +$unseen" else "回到最新",style=MaterialTheme.typography.labelMedium)
                     }
                 }
                 HorizontalDivider(color=MaterialTheme.colorScheme.outlineVariant.copy(alpha=.5f))
                 Row(Modifier.fillMaxWidth().heightIn(min=62.dp)) {
                     ClassroomAction("grid","总览",count>0,Modifier.weight(1f)) {following=false;panel="pages"}
-                    ClassroomAction("edit",if(material?.pageNotes?.containsKey(currentPage)==true) "有批注" else "批注",count>0,Modifier.weight(1f)) {following=false;panel="note"}
+                    ClassroomAction("edit",if(material?.pageNotes?.containsKey(currentPage)==true) "有批注" else "批注",count>0,Modifier.weight(1f)) {following=false;material?.let {noteSnapshot=it to currentPage}}
                     ClassroomAction("image","保存当页",count>0,Modifier.weight(1f)) {
-                        if(material!=null) {imageSavePage=currentPage;if(Build.VERSION.SDK_INT>=29) model.savePageImage(material.id,currentPage) else saveLocation.launch("${material.title}_第${currentPage}页.png")}
+                        saveCurrentPage()
                     }
                     ClassroomAction("export","导出 PDF",count>0,Modifier.weight(1f)) {exportSnapshot=material?.copy(lastPage=currentPage)}
                     ClassroomAction("fullscreen","全屏",count>0,Modifier.weight(1f)) {setFull(true)}
@@ -193,7 +208,7 @@ fun ClassroomScreen(session: ClassroomSession,material: StudyMaterial?,state: Ui
             }
         }
     }
-    if(panel=="note" && material!=null && count>0) PageNoteSheet(material,currentPage,model) {panel=null}
+    noteSnapshot?.let {(snapshot,page) ->PageNoteSheet(snapshot,page,model) {noteSnapshot=null}}
     if(panel=="pages" && material!=null) ModalBottomSheet(onDismissRequest={panel=null},sheetState=rememberModalBottomSheetState(skipPartiallyExpanded=true)) {
         Column(Modifier.fillMaxHeight(.8f)) {
             Row(Modifier.padding(horizontal=20.dp),verticalAlignment=Alignment.CenterVertically) {Text("已保存 $count 页",Modifier.weight(1f),style=MaterialTheme.typography.titleMedium);TextButton(onClick={followLatest();panel=null}) {Text("回到最新")}}
@@ -254,7 +269,7 @@ internal fun PageNoteSheet(material: StudyMaterial,page: Int,model: KeyeViewMode
             OutlinedTextField(text,{text=it.take(2000)},label={Text("记录这页的重点")},minLines=4,maxLines=8,enabled=!saving,modifier=Modifier.fillMaxWidth(),supportingText={Text("${text.length} / 2000 · 按页保存，不修改原图")})
             error?.let {Text(it,color=MaterialTheme.colorScheme.error,style=MaterialTheme.typography.bodySmall)}
             Text("保存图片会附上批注；导出 PDF 时可选择是否包含。",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
-            Button(onClick={saving=true;scope.launch {try {model.savePageNote(material.id,page,text);onDismiss()} catch(cancel: CancellationException) {throw cancel} catch(problem: Exception) {error=problem.message ?: "保存失败，请重试"} finally {saving=false}}},enabled=!saving,modifier=Modifier.fillMaxWidth()) {Text(if(saving) "保存中" else "保存批注")}
+            Button(onClick={saving=true;scope.launch {try {model.savePageNote(material.id,page,text,if(material.kind=="images") material.pages.getOrNull(page-1)?.source else null);onDismiss()} catch(cancel: CancellationException) {throw cancel} catch(problem: Exception) {error=problem.message ?: "保存失败，请重试"} finally {saving=false}}},enabled=!saving,modifier=Modifier.fillMaxWidth()) {Text(if(saving) "保存中" else "保存批注")}
         }
     }
     if(discard) AlertDialog(onDismissRequest={discard=false},title={Text("放弃未保存的批注？")},confirmButton={TextButton(onClick={discard=false;onDismiss()}) {Text("放弃")}},dismissButton={TextButton(onClick={discard=false}) {Text("继续编辑")}})

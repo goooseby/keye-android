@@ -1,6 +1,8 @@
 package io.github.goooseby.keye
 
 import android.webkit.CookieManager
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
@@ -22,47 +24,53 @@ fun SettingsScreen(state: UiState,model: KeyeViewModel,onLogin: () -> Unit,onTas
     val currentVersion=remember {context.packageManager.getPackageInfo(context.packageName,0).versionName.orEmpty()}
     var networkOpen by remember{mutableStateOf(false)}
     var confirmLogout by remember{mutableStateOf(false)}
-    LazyColumn(contentPadding=PaddingValues(20.dp,12.dp,20.dp,28.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
+    LazyColumn(Modifier.fillMaxSize(),contentPadding=PaddingValues(20.dp,4.dp,20.dp,12.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
         item {
-            Surface(shape=RoundedCornerShape(23.dp),color=MaterialTheme.colorScheme.surfaceContainer) {
-                Row(Modifier.fillMaxWidth().padding(20.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(15.dp)) {
-                    IconBadge("school",Modifier.size(54.dp))
-                    Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(6.dp)) {
-                        Text("学校平台",style=MaterialTheme.typography.titleMedium)
-                        StatusPill(schoolConnectionLabel(state.schoolConnection),if(state.schoolConnection==SchoolConnection.Expired) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)
+            Surface(shape=RoundedCornerShape(20.dp),color=MaterialTheme.colorScheme.surfaceContainer) {
+                Row(Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=12.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(12.dp)) {
+                    IconBadge("school",Modifier.size(42.dp))
+                    Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(4.dp)) {
+                        Text("学校平台",style=MaterialTheme.typography.titleSmall)
+                        Text(schoolConnectionLabel(state.schoolConnection),style=MaterialTheme.typography.labelMedium,
+                            color=if(state.schoolConnection==SchoolConnection.Expired) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)
                     }
-                    if(!state.loggedIn) FilledTonalButton(onClick=onLogin,shape=RoundedCornerShape(12.dp)){Text(if(state.schoolConnection==SchoolConnection.Expired) "重新登录" else "登录")}
-                    else IconButton(onClick={confirmLogout=true}){AppIcon("logout","退出登录")}
+                    if(!state.loggedIn) FilledTonalButton(onClick=onLogin){Text(if(state.schoolConnection==SchoolConnection.Expired) "重新登录" else "登录")}
+                    else IconButton(onClick={confirmLogout=true}) {AppIcon("logout","退出登录")}
+                    if(state.schoolConnection==SchoolConnection.Unverified) IconButton(onClick={model.checkSchoolSession(CookieManager.getInstance().getCookie(SchoolApi.HOME),force=true)}) {AppIcon("refresh","重新检查连接")}
                 }
             }
         }
-        if(state.schoolConnection==SchoolConnection.Unverified) item {
-            Surface(shape=RoundedCornerShape(20.dp),color=MaterialTheme.colorScheme.surfaceContainer) {
-                PreferenceRow("refresh","重新检查学校连接","登录信息已保留，无需因断网退出账号",onClick={model.checkSchoolSession(CookieManager.getInstance().getCookie(SchoolApi.HOME),force=true)})
-            }
-        }
-        item{Surface(shape=RoundedCornerShape(20.dp),color=MaterialTheme.colorScheme.surfaceContainer){PreferenceRow("tasks","下载管理",onClick=onTasks)}}
-        item{SectionLabel("下载")}
-        item{
-            Surface(shape=RoundedCornerShape(20.dp),color=MaterialTheme.colorScheme.surfaceContainer) {
-                PreferenceRow("download","下载参数","超时 ${state.settings.timeoutSeconds} 秒 · 重试 ${state.settings.retryCount} 次",onClick={networkOpen=true})
-            }
-        }
-        item{SectionLabel("资料")}
-        item{
+        item {
             Surface(shape=RoundedCornerShape(20.dp),color=MaterialTheme.colorScheme.surfaceContainer) {
                 Column {
-                    PreferenceRow("storage","本机资料","课程、原件与阅读进度保存在本机")
-                    HorizontalDivider(Modifier.padding(start=70.dp),color=MaterialTheme.colorScheme.outlineVariant.copy(alpha=.5f))
-                    ExportLocationRow()
-                    HorizontalDivider(Modifier.padding(start=70.dp),color=MaterialTheme.colorScheme.outlineVariant.copy(alpha=.5f))
-                    PreferenceRow("trash","回收站",onClick=onTrash)
+                    PreferenceRow("tasks","下载管理",compact=true,onClick=onTasks)
+                    HorizontalDivider(Modifier.padding(start=62.dp),color=MaterialTheme.colorScheme.outlineVariant.copy(alpha=.5f))
+                    PreferenceRow("download","下载参数","超时 ${state.settings.timeoutSeconds} 秒 · 重试 ${state.settings.retryCount} 次",compact=true,onClick={networkOpen=true})
                 }
             }
         }
-        item{Text("卸载应用前，请先导出需要保留的课件。",Modifier.padding(horizontal=6.dp),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)}
-        item{SectionLabel("关于")}
-        item{Surface(shape=RoundedCornerShape(20.dp),color=MaterialTheme.colorScheme.surfaceContainer){PreferenceRow("refresh","应用更新",subtitle=updateStatus?:"当前版本 $currentVersion",onClick=onUpdates)}}
+        item {
+            Surface(shape=RoundedCornerShape(20.dp),color=MaterialTheme.colorScheme.surfaceContainer) {
+                Column {
+                    ExportLocationRow(compact=true)
+                    HorizontalDivider(Modifier.padding(start=62.dp),color=MaterialTheme.colorScheme.outlineVariant.copy(alpha=.5f))
+                    PreferenceRow("trash","回收站",compact=true,onClick=onTrash)
+                }
+            }
+        }
+        item {Text("课件与阅读进度保存在本机，卸载前请先导出。",Modifier.padding(horizontal=4.dp),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)}
+        item {
+            Surface(shape=RoundedCornerShape(20.dp),color=MaterialTheme.colorScheme.surfaceContainer) {
+                Column {
+                    PreferenceRow("refresh","应用更新",subtitle=updateStatus?:"当前版本 $currentVersion",compact=true,onClick=onUpdates)
+                    HorizontalDivider(Modifier.padding(start=62.dp),color=MaterialTheme.colorScheme.outlineVariant.copy(alpha=.5f))
+                    PreferenceRow("code","GitHub · Keye","代码公开，欢迎探索和改进",compact=true,onClick={
+                        runCatching {context.startActivity(Intent(Intent.ACTION_VIEW,Uri.parse("https://github.com/goooseby/keye-android")))}
+                            .onFailure {model.notice("暂时无法打开浏览器")}
+                    })
+                }
+            }
+        }
     }
     if(confirmLogout) AlertDialog(onDismissRequest={confirmLogout=false},icon={AppIcon("logout")},title={Text("退出学校登录？")},text={Text("本机课件与阅读进度会保留。")},confirmButton={TextButton(onClick={CookieManager.getInstance().removeAllCookies(null);CookieManager.getInstance().flush();model.logout();confirmLogout=false}){Text("退出")}},dismissButton={TextButton(onClick={confirmLogout=false}){Text("取消")}})
     if(networkOpen) {

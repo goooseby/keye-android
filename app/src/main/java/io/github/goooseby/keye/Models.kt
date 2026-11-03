@@ -119,14 +119,18 @@ data class ScheduleEntry(
     val title: String,
     val day: String,
     val courseId: String,
-    val subId: String
+    val subId: String,
+    val startsAt: Long? = null,
+    val endsAt: Long? = null
 ) {
     fun json() = JSONObject().put("id", id).put("groupId", groupId).put("title", title)
-        .put("day", day).put("courseId", courseId).put("subId", subId)
+        .put("day", day).put("courseId", courseId).put("subId", subId).put("startsAt",startsAt).put("endsAt",endsAt)
     companion object {
         fun from(value: JSONObject) = ScheduleEntry(
             value.getString("id"), value.getString("groupId"), value.getString("title"),
-            value.getString("day"), value.getString("courseId"), value.getString("subId")
+            value.getString("day"), value.getString("courseId"), value.getString("subId"),
+            if(value.isNull("startsAt")) null else value.getLong("startsAt"),
+            if(value.isNull("endsAt")) null else value.getLong("endsAt")
         )
     }
 }

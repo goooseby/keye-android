@@ -128,11 +128,11 @@ fun SheetHeading(title: String, onClose: () -> Unit) {
 
 @Composable
 fun PreferenceRow(icon: String, title: String, subtitle: String? = null,
-                  value: String? = null, onClick: (() -> Unit)? = null) {
+                  value: String? = null, onClick: (() -> Unit)? = null,compact: Boolean=false) {
     Row(Modifier.fillMaxWidth().then(if(onClick!=null) Modifier.clickable(onClick=onClick) else Modifier)
-        .padding(horizontal=16.dp, vertical=16.dp), verticalAlignment=Alignment.CenterVertically,
+        .padding(horizontal=16.dp, vertical=if(compact) 10.dp else 16.dp), verticalAlignment=Alignment.CenterVertically,
         horizontalArrangement=Arrangement.spacedBy(14.dp)) {
-        IconBadge(icon, Modifier.size(40.dp))
+        IconBadge(icon, Modifier.size(if(compact) 34.dp else 40.dp))
         Column(Modifier.weight(1f), verticalArrangement=Arrangement.spacedBy(3.dp)) {
             Text(title, style=MaterialTheme.typography.bodyLarge)
             subtitle?.let {Text(it, style=MaterialTheme.typography.bodySmall, color=MaterialTheme.colorScheme.onSurfaceVariant)}

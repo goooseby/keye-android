@@ -32,6 +32,8 @@ fun AcquireScreen(state: UiState,model: KeyeViewModel,onLogin: () -> Unit,onDown
     var end by remember(state.endDate){mutableStateOf(state.endDate)}
     var selected by remember{mutableStateOf(emptySet<String>())}
     var expanded by remember(state.schedule) {mutableStateOf(emptySet<String>())}
+    var now by remember {mutableLongStateOf(System.currentTimeMillis())}
+    LaunchedEffect(Unit) {while(true) {now=System.currentTimeMillis();kotlinx.coroutines.delay(15_000)}}
     val groups=remember(state.schedule) {state.schedule.groupBy(ScheduleEntry::groupId)}
     fun activeCapture(entry: ScheduleEntry)=state.classroom?.let {it.entry.id==entry.id && it.stage!=ClassroomStage.Ended}==true
     fun selectable(entry: ScheduleEntry)=!activeCapture(entry) && state.materials.none {it.sourceKey==entry.id && (it.pages.isNotEmpty() || it.deleted)}
@@ -66,7 +68,9 @@ fun AcquireScreen(state: UiState,model: KeyeViewModel,onLogin: () -> Unit,onDown
                         Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                             SuggestionChip(onClick={end=LocalDate.now().toString();start=end;model.scan(start,end)},enabled=!state.busy,label={Text("今天")})
                             SuggestionChip(onClick={end=LocalDate.now().toString();start=LocalDate.now().minusDays(14).toString();model.scan(start,end)},enabled=!state.busy,label={Text("近两周")})
-                            Spacer(Modifier.weight(1f))
+                            SuggestionChip(onClick={end=LocalDate.now().toString();start=semesterStart(LocalDate.now()).toString();model.scan(start,end)},enabled=!state.busy,label={Text("本学期")})
+                        }
+                        Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.End) {
                             Text("${groups.size} 门 · ${state.schedule.size} 节",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
@@ -74,7 +78,7 @@ fun AcquireScreen(state: UiState,model: KeyeViewModel,onLogin: () -> Unit,onDown
                 item {
                     state.classroom?.let {session ->
                         PreferenceRow("live","继续课堂跟看",session.entry.title+" · "+when(session.stage) {ClassroomStage.Ended ->"已结束";ClassroomStage.NeedsLogin ->"需登录";else ->"已保存，可继续"},onClick=onResumeFollow)
-                    } ?: Text("课次右侧的“跟看”可持续获取新增页面",Modifier.padding(horizontal=20.dp,vertical=8.dp),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                    } ?: Text("正在上课的课次会显示“跟看”，可持续接收新增页面",Modifier.padding(horizontal=20.dp,vertical=8.dp),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 if(state.schedule.isEmpty()) item {EmptyState(if(state.busy) "clock" else "calendar",if(state.busy) "正在查询课表" else "暂无课次",detail=if(state.busy) null else "选择日期范围后查询")}
                 if(groups.isNotEmpty()) item {
@@ -114,7 +118,7 @@ fun AcquireScreen(state: UiState,model: KeyeViewModel,onLogin: () -> Unit,onDown
                                 Row(Modifier.fillMaxWidth().heightIn(min=52.dp).padding(start=24.dp,end=8.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(12.dp)) {
                                     AppIcon("document",modifier=Modifier.size(19.dp))
                                     Text(runCatching{LocalDate.parse(entry.day).format(DateTimeFormatter.ofPattern("M月d日  EEE",Locale.SIMPLIFIED_CHINESE))}.getOrDefault(entry.day),Modifier.weight(1f),style=MaterialTheme.typography.bodyMedium)
-                                    TextButton(onClick={onFollow(entry)},contentPadding=PaddingValues(horizontal=8.dp)) {AppIcon("live",modifier=Modifier.size(17.dp));Spacer(Modifier.width(4.dp));Text("跟看",style=MaterialTheme.typography.labelMedium)}
+                                    if(entry.isInProgress(now) || activeCapture(entry)) TextButton(onClick={onFollow(entry)},contentPadding=PaddingValues(horizontal=8.dp)) {AppIcon("live",modifier=Modifier.size(17.dp));Spacer(Modifier.width(4.dp));Text(if(entry.isInProgress(now)) "上课中 · 跟看" else "继续跟看",style=MaterialTheme.typography.labelMedium)}
                                     if(downloaded) Text("打开",Modifier.padding(end=12.dp),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                                     else if(activeCapture(entry)) Text("待增页",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                                     else Checkbox(checked,{selected=if(it) selected+entry.id else selected-entry.id})

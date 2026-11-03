@@ -8,6 +8,9 @@ import android.graphics.BitmapFactory
 import android.graphics.pdf.PdfRenderer
 import android.os.ParcelFileDescriptor
 import android.view.WindowManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.foundation.*
@@ -84,6 +87,20 @@ fun ReaderScreen(material: StudyMaterial,model: KeyeViewModel,mediaPath: (String
     val pager=rememberPagerState(initialPage=start,pageCount={visibleIndices.size})
     val current by remember(visibleIndices,effectiveMode) {derivedStateOf {visibleIndices[(if(effectiveMode=="continuous") list.firstVisibleItemIndex else pager.currentPage).coerceIn(visibleIndices.indices)]}}
     val scope=rememberCoroutineScope()
+    val saveSnackbar=remember {SnackbarHostState()}
+    LaunchedEffect(exportState?.result?.uri,exportState?.failed) {
+        if(fullscreen && exportState?.result?.mime=="image/png") saveSnackbar.showSnackbar("当前页已保存到 ${exportState.result.location}")
+        else if(fullscreen && exportState?.failed==true) saveSnackbar.showSnackbar(exportState.message)
+    }
+    var imageSavePage by rememberSaveable {mutableIntStateOf(1)}
+    val saveLocation=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("image/png")) {uri ->
+        if(uri!=null) model.savePageImage(material.id,imageSavePage,uri)
+    }
+    fun saveCurrentPage() {
+        imageSavePage=current+1;controlInteraction++
+        if(Build.VERSION.SDK_INT>=29) model.savePageImage(material.id,imageSavePage)
+        else saveLocation.launch("${material.title}_第${imageSavePage}页.png")
+    }
     val colors=listOf(Color(0xFFF0F3F8),Color(0xFFE5F1EA),Color(0xFFFFF0D9),Color(0xFF182028))
     val stage=if(fullscreen) Color.Black else colors[background.coerceIn(colors.indices)]
     fun jump(original: Int) {
@@ -197,11 +214,8 @@ fun ReaderScreen(material: StudyMaterial,model: KeyeViewModel,mediaPath: (String
             }
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
-            if(effectiveMode=="continuous") LazyColumn(state=list,modifier=Modifier.fillMaxSize(),userScrollEnabled=!zoomed,verticalArrangement=Arrangement.spacedBy(0.dp)) {
-                items(visibleIndices,key={it}) {original ->
-                    ReaderCanvas(material.pages[original],mediaPath,Modifier.fillMaxWidth(),pageNumber=original+1,continuous=true,active=original==current,resetToken=resetToken,onTap={chrome=!chrome},onZoomed={if(original==current) zoomed=it})
-                }
-            } else HorizontalPager(pager,userScrollEnabled=!zoomed,modifier=Modifier.fillMaxSize(),beyondViewportPageCount=1,key={visibleIndices[it]}) {position ->
+            if(effectiveMode=="continuous") ContinuousReader(material,visibleIndices,list,mediaPath,resetToken,
+                onTap={chrome=!chrome},onZoomed={zoomed=it}) else HorizontalPager(pager,userScrollEnabled=!zoomed,modifier=Modifier.fillMaxSize(),beyondViewportPageCount=1,key={visibleIndices[it]}) {position ->
                 val original=visibleIndices[position]
                 ReaderCanvas(material.pages[original],mediaPath,Modifier.fillMaxSize(),pageNumber=original+1,continuous=false,active=original==current,resetToken=resetToken,onTap={chrome=!chrome},onZoomed={if(original==current) zoomed=it})
             }
@@ -215,7 +229,8 @@ fun ReaderScreen(material: StudyMaterial,model: KeyeViewModel,mediaPath: (String
                 onExit={setFull(false)}, onPrevious={stepPage(-1)}, onNext={stepPage(1)},
                 onSeek={controlInteraction++;resetToken++;jump(visibleIndices[it])}, onScrubbing={scrubbing=it;controlInteraction++},
                 onBookmark={controlInteraction++;model.bookmark(material.id,current+1)},
-                onReset={controlInteraction++;resetToken++})
+                onReset={controlInteraction++;resetToken++},onSavePage={saveCurrentPage()},saveBusy=exportState?.running==true)
+            if(fullscreen) SnackbarHost(saveSnackbar,Modifier.align(Alignment.TopCenter).padding(top=64.dp))
             if(!fullscreen) Column(Modifier.align(Alignment.BottomCenter)) {
                 undoPages?.let {previous ->
                     Snackbar(Modifier.padding(12.dp),action={TextButton(onClick={targetOnSwitch=current;model.setExcluded(material.id,previous);undoPages=null}) {Text("撤销")}},dismissAction={IconButton(onClick={undoPages=null}) {AppIcon("close","关闭页面移除提示")}}) {Text("已移除页面，可在总览中恢复")}
@@ -256,6 +271,7 @@ fun ReaderScreen(material: StudyMaterial,model: KeyeViewModel,mediaPath: (String
             ReaderToolGroup("导出与分享",listOf(
                 ReaderTool("export","导出 PDF") {panel=null;onExport()},
                 ReaderTool("share","分享 PDF") {panel=null;onShare()},
+                ReaderTool("download","保存本页") {panel=null;saveCurrentPage()},
                 ReaderTool("image","分享本页") {panel=null;model.sharePage(material.id,current+1)}))
         }
     }
@@ -395,12 +411,12 @@ private data class ReaderBitmap(val bitmap: Bitmap?=null,val finished: Boolean=f
 private val readerCache=object:android.util.LruCache<String,Bitmap>(40*1024*1024) {override fun sizeOf(key:String,value:Bitmap)=value.allocationByteCount}
 
 @Composable
-internal fun ReaderCanvas(page: PageFile,mediaPath: (String) -> File,modifier: Modifier,pageNumber: Int,continuous: Boolean,active: Boolean,resetToken: Int,onTap: () -> Unit,onZoomed: (Boolean) -> Unit) {
+internal fun ReaderCanvas(page: PageFile,mediaPath: (String) -> File,modifier: Modifier,pageNumber: Int,continuous: Boolean,active: Boolean,resetToken: Int,onTap: () -> Unit,onZoomed: (Boolean) -> Unit,gesturesEnabled: Boolean=true,highResolution: Boolean=false) {
     var scale by remember(page.source,page.pdfPage) {mutableFloatStateOf(1f)}
     var offset by remember(page.source,page.pdfPage) {mutableStateOf(Offset.Zero)}
     var bounds by remember {mutableStateOf(IntSize.Zero)}
     val source=mediaPath(page.source)
-    val maxSize=if(scale>1.01f) 3000 else 1800
+    val maxSize=if(highResolution || scale>1.01f) 3000 else 1800
     val loaded by produceState(ReaderBitmap(),source.path,page.pdfPage,maxSize) {
         val key="${source.path}:${source.lastModified()}:${page.pdfPage}:$maxSize"
         val bitmap=withContext(Dispatchers.IO) {
@@ -427,11 +443,11 @@ internal fun ReaderCanvas(page: PageFile,mediaPath: (String) -> File,modifier: M
     }
     val aspect=bitmap?.let {it.width.toFloat()/it.height} ?: previewAspect
     Box(modifier.then(if(continuous) Modifier.aspectRatio(aspect) else Modifier).clipToBounds().onSizeChanged {bounds=it}
-        .transformable(transform,canPan={scale>1.01f})
-        .pointerInput(page.source,page.pdfPage) {detectTapGestures(onTap={currentTap()},onDoubleTap={point ->
+        .then(if(gesturesEnabled) Modifier.transformable(transform,canPan={scale>1.01f}) else Modifier)
+        .then(if(gesturesEnabled) Modifier.pointerInput(page.source,page.pdfPage) {detectTapGestures(onTap={currentTap()},onDoubleTap={point ->
             scale=if(scale>1.01f) 1f else 2.5f
             offset=if(scale==1f) Offset.Zero else Offset((bounds.width/2-point.x)*(scale-1),(bounds.height/2-point.y)*(scale-1))
-        })},contentAlignment=Alignment.Center) {
+        })} else Modifier),contentAlignment=Alignment.Center) {
         if(bitmap!=null) Image(bitmap.asImageBitmap(),"第${pageNumber}页课件",Modifier.fillMaxSize().graphicsLayer {scaleX=scale;scaleY=scale;translationX=offset.x;translationY=offset.y},contentScale=ContentScale.Fit)
         else if(!loaded.finished) CircularProgressIndicator(Modifier.size(22.dp),strokeWidth=2.dp)
         else Text("页面无法读取",color=MaterialTheme.colorScheme.error,modifier=Modifier.padding(16.dp))

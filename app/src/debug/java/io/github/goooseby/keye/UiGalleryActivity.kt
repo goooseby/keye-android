@@ -23,7 +23,8 @@ class UiGalleryActivity: ComponentActivity() {
             val actual by model.state.collectAsState()
             val courses=listOf(Course("visual-math","高等数学","2026 秋季"),Course("visual-net","计算机网络","2026 秋季"),Course("visual-algo","数据结构与算法","专业课程"),Course("visual-english","大学英语","通识课程"))
             val names=listOf("第三章 · 微分与导数","第二章 · 网络体系结构","线性表与链式存储")
-            val materials=actual.materials.filterNot(StudyMaterial::deleted).sortedWith(compareBy<StudyMaterial>{if(it.kind=="pdf") 0 else 1}.thenBy{it.pages.size}).take(3).mapIndexed{i,m ->m.copy(title=names[i],courseId=courses[0].id,note=if(i==0) "课堂重点与例题" else "",day="2026-11-02")}
+            val requested=intent.getStringExtra("material")
+            val materials=if(requested!=null) actual.materials.filter {it.id==requested} else actual.materials.filterNot(StudyMaterial::deleted).sortedWith(compareBy<StudyMaterial>{if(it.kind=="pdf") 0 else 1}.thenBy{it.pages.size}).take(3).mapIndexed{i,m ->m.copy(title=names[i],courseId=courses[0].id,note=if(i==0) "课堂重点与例题" else "",day="2026-11-02")}
             val entries=listOf(ScheduleEntry("visual-1","visual-math","高等数学","2026-11-02","1","1"),ScheduleEntry("visual-2","visual-math","高等数学","2026-10-30","1","2"),ScheduleEntry("visual-3","visual-net","计算机网络","2026-11-01","2","3"))
             val now=System.currentTimeMillis()
             val tasks=listOf(TaskRecord(id="visual-run",type="download",title="计算机网络 · 第三讲",status="running",progress=64,message="已下载 32 / 50 页",updatedAt=now),TaskRecord(id="visual-error",type="download",title="高等数学 · 微分与导数",status="failed",message="网络连接中断，请检查网络后重试",updatedAt=now-1000),TaskRecord(id="visual-done",type="export",title="数据结构与算法",status="done",payload="content://visual",updatedAt=now-2000),TaskRecord(id="visual-wait",type="import",title="线性表与链式存储.pdf",status="queued",message="等待导入",updatedAt=now-3000))

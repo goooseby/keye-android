@@ -23,7 +23,7 @@ fun FullscreenReaderControls(
     retainedCount: Int, bookmarked: Boolean, zoomed: Boolean,
     onExit: () -> Unit, onPrevious: () -> Unit, onNext: () -> Unit,
     onSeek: (Int) -> Unit, onScrubbing: (Boolean) -> Unit,
-    onBookmark: () -> Unit, onReset: () -> Unit
+    onBookmark: () -> Unit, onReset: () -> Unit, onSavePage: () -> Unit,saveBusy: Boolean=false
 ) {
     var preview by remember {mutableStateOf<Float?>(null)}
     // A cancelled gesture (including rotation or hiding the controls) must not
@@ -38,6 +38,7 @@ fun FullscreenReaderControls(
                     verticalAlignment=Alignment.CenterVertically) {
                     IconButton(onClick=onExit) {AppIcon("back","退出全屏")}
                     Text(title,Modifier.weight(1f).padding(start=8.dp),style=MaterialTheme.typography.titleSmall,maxLines=1,overflow=TextOverflow.Ellipsis)
+                    IconButton(onClick=onSavePage,enabled=!saveBusy) {if(saveBusy) CircularProgressIndicator(Modifier.size(22.dp),color=Color.White,strokeWidth=2.dp) else AppIcon("download","保存当页图片")}
                     IconToggleButton(checked=bookmarked,onCheckedChange={onBookmark()}) {
                         CompositionLocalProvider(LocalContentColor provides if(bookmarked) Color(0xFF8ED8FF) else Color.White) {AppIcon("bookmark",if(bookmarked) "移除书签" else "添加书签")}
                     }

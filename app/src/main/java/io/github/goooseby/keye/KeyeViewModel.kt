@@ -312,7 +312,7 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
                     val legacyHashes=initial.pages.mapIndexedNotNull {index,page ->if(page.remoteKey!=null) null else runCatching {
                         val digest=java.security.MessageDigest.getInstance("SHA-256")
                         media.file(page.source).inputStream().use {input ->val buffer=ByteArray(65536);while(true) {val n=input.read(buffer);if(n<0) break;digest.update(buffer,0,n)}}
-                        index to digest.digest().toList()
+                        page.source to digest.digest().toList()
                     }.getOrNull()}.toMap()
                     var failures=0
                     while(kotlinx.coroutines.currentCoroutineContext().isActive && classroomGeneration.get()==generation) {
@@ -326,14 +326,15 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
                             publish {it.copy(stage=if(it.checkedAt==0L) ClassroomStage.Connecting else ClassroomStage.Connected,fetching=true,message=if(it.checkedAt==0L) "正在查找课件页面" else it.message)}
                             val before=store.material(initial.id)
                             if(before==null || before.deleted) {publish {it.copy(stage=ClassroomStage.Ended,fetching=false,message="课件已移入回收站，请恢复后重新跟看")};break}
+                            val fetchStarted=android.os.SystemClock.elapsedRealtime()
                             val catalog=source.pages(entry)
                             coroutineContext.ensureActive()
                             if(classroomGeneration.get()!=generation) break
                             val current=store.material(initial.id) ?: error("课件不存在")
                             check(!current.deleted) {"课件已移入回收站，请恢复后重新跟看"}
-                            val pending=pendingClassroomPages(current.pages.mapNotNull {it.remoteKey}.toSet(),catalog)
+                            val pending=pendingClassroomPages(current.pages.mapNotNull {it.remoteKey}.toSet(),catalog).asReversed()
                             publish {it.copy(remoteCount=catalog.size)}
-                            for((position,remote) in pending.withIndex()) {
+                            for((position,remote) in pending.take(3).withIndex()) {
                                 coroutineContext.ensureActive()
                                 if(!classroomForeground || classroomManuallyPaused) break
                                 publish {it.copy(message="正在保存新页面 ${position+1} / ${pending.size}")}
@@ -350,16 +351,19 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
                                         val latest=store.material(initial.id) ?: error("课件不存在")
                                         check(!latest.deleted) {"课件已移入回收站"}
                                         if(latest.pages.any {it.remoteKey==remote.key}) return@withLock
-                                        val legacy=legacyHashes.entries.firstOrNull {(index,oldHash) ->oldHash==hash && latest.pages.getOrNull(index)?.remoteKey==null}?.key
-                                        val pages=if(legacy!=null) latest.pages.mapIndexed {index,page ->if(index==legacy) page.copy(remoteKey=remote.key) else page}
-                                            else {created=media.classroomImage(latest.id,remote.key,bytes);latest.pages+created!!}
+                                        val legacy=legacyHashes.entries.firstOrNull {(source,oldHash) ->oldHash==hash && latest.pages.any {it.source==source && it.remoteKey==null}}?.key
+                                        val changed=if(legacy!=null) latest.copy(pages=latest.pages.map {page ->if(page.source==legacy) page.copy(remoteKey=remote.key) else page})
+                                            else {
+                                                created=media.classroomImage(latest.id,remote.key,bytes)
+                                                insertClassroomPage(latest,created!!,catalog)
+                                            }
                                         coroutineContext.ensureActive()
-                                        val changed=latest.copy(pages=pages,revision=latest.revision+if(legacy==null) 1 else 0,touched=if(legacy==null) System.currentTimeMillis() else latest.touched)
                                         store.put(changed);committed=true
                                         mutableState.update {state ->state.copy(materials=state.materials.filterNot {it.id==changed.id}+changed)}
                                     }
                                 } finally {if(!committed) created?.let(media::discardClassroomPage)}
                             }
+                            if(pending.size>3) waitMillis=(waitMillis-(android.os.SystemClock.elapsedRealtime()-fetchStarted)).coerceAtLeast(1L)
                             failures=0
                             publish {it.copy(stage=if(!classroomForeground||classroomManuallyPaused) ClassroomStage.Paused else if(catalog.isEmpty()) ClassroomStage.Waiting else ClassroomStage.Connected,
                                 fetching=false,checkedAt=System.currentTimeMillis(),retrySeconds=0,
@@ -380,10 +384,11 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
             }
         }
     }
-    suspend fun savePageNote(id: String,page: Int,text: String) = withContext(Dispatchers.IO) {
+    suspend fun savePageNote(id: String,page: Int,text: String,source: String?=null) = withContext(Dispatchers.IO) {
         editMaterial(id) {current ->
-            require(page in 1..current.pages.size) {"页码无效"}
-            val notes=if(text.isBlank()) current.pageNotes-page else current.pageNotes+(page to text.trim().take(2000))
+            val target=if(source==null) page else current.pages.indexOfFirst {it.source==source}+1
+            require(target in 1..current.pages.size) {"页码无效"}
+            val notes=if(text.isBlank()) current.pageNotes-target else current.pageNotes+(target to text.trim().take(2000))
             current.copy(pageNotes=notes,revision=current.revision+if(notes==current.pageNotes) 0 else 1)
         }
     }
@@ -486,17 +491,22 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
         editMaterial(id) { it.copy(reviewRevision = it.revision, touched = System.currentTimeMillis()) }
     }
 
-    fun lastPage(id: String, page: Int, offset: Int = 0, fraction: Float=0f) = action {
+    fun lastPage(id: String, page: Int, offset: Int = 0, fraction: Float=0f,source: String?=null) = action {
         materialMutex.withLock {
             val current = store.material(id) ?: return@withLock
-            val updated = current.copy(lastPage=page.coerceIn(1,current.pages.size.coerceAtLeast(1)), readOffset=offset.coerceAtLeast(0), readFraction=fraction.coerceIn(0f,.999f), readAt=System.currentTimeMillis())
+            val target=if(source==null) page else current.pages.indexOfFirst {it.source==source}+1
+            if(target<1) return@withLock
+            val updated = current.copy(lastPage=target.coerceIn(1,current.pages.size.coerceAtLeast(1)), readOffset=offset.coerceAtLeast(0), readFraction=fraction.coerceIn(0f,.999f), readAt=System.currentTimeMillis())
             store.put(updated)
             mutableState.update { state -> state.copy(materials=state.materials.map { if(it.id==id) updated else it }) }
         }
     }
 
-    fun bookmark(id: String, page: Int) = action {
-        editMaterial(id) { current -> current.copy(bookmarks=if(page in current.bookmarks) current.bookmarks-page else current.bookmarks+page) }
+    fun bookmark(id: String, page: Int,source: String?=null) = action {
+        editMaterial(id) { current ->
+            val target=if(source==null) page else current.pages.indexOfFirst {it.source==source}+1
+            if(target<1) current else current.copy(bookmarks=if(target in current.bookmarks) current.bookmarks-target else current.bookmarks+target)
+        }
     }
 
     private fun putTask(task: TaskRecord) {
@@ -716,12 +726,13 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
     private var lastExportRequest: ExportRequest?=null
     fun retryExport() {lastExportRequest?.let {export(it)}}
     fun sharePage(id: String,page: Int) {
+        val captured=state.value.materials.firstOrNull {it.id==id}
         if(exportJob?.isActive==true) {notice("正在准备文件，请稍候");return}
         mutableState.update {it.copy(exportState=ExportState(running=true,message="正在准备当前页"))}
         exportJob=viewModelScope.launch(Dispatchers.IO) {
             var imageFile: File?=null
             try {
-                val material=store.material(id) ?: error("课件不存在")
+                val material=captured ?: store.material(id) ?: error("课件不存在")
                 val source=material.pages.getOrNull(page-1) ?: error("页码无效")
                 val directory=File(getApplication<Application>().cacheDir,"shared/${newId()}").apply {mkdirs()}
                 imageFile=File(directory,"${material.title.replace(Regex("""[\/:*?"<>|]"""),"_").take(80)}_第${page}页.png")
@@ -735,14 +746,15 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
             catch(error: Exception) {imageFile?.delete();mutableState.update {it.copy(exportState=ExportState(failed=true,message=error.message?:"无法分享当前页"))}}
         }
     }
-    fun savePageImage(id: String,page: Int,chosenUri: Uri?=null) {
+    fun savePageImage(id: String,page: Int,chosenUri: Uri?=null,snapshot: StudyMaterial?=null) {
         if(exportJob?.isActive==true) {notice("正在准备文件，请稍候");return}
+        val captured=snapshot ?: state.value.materials.firstOrNull {it.id==id}
         mutableState.update {it.copy(exportState=ExportState(running=true,message="正在保存当前页"))}
         exportJob=viewModelScope.launch(Dispatchers.IO) {
             val app=getApplication<Application>()
             var created:Uri?=null
             try {
-                val material=store.material(id) ?: error("课件不存在")
+                val material=captured ?: store.material(id) ?: error("课件不存在")
                 val source=material.pages.getOrNull(page-1) ?: error("页码无效")
                 val bitmap=withPageNote(renderReadingPage(media.file(source.source),source.pdfPage,2400) ?: error("无法读取页面"),material.pageNotes[page].orEmpty())
                 val name=material.title.replace(Regex("""[\/:*?"<>|]"""),"_").take(70)+"_第${page}页.png"

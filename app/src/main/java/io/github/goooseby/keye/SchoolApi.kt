@@ -150,7 +150,7 @@ class SchoolApi {
 
     fun scan(auth: SchoolAuth, start: LocalDate, end: LocalDate, timeoutSeconds: Int): List<ScheduleEntry> {
         require(!end.isBefore(start)) { "开始日期不能晚于结束日期" }
-        require(java.time.temporal.ChronoUnit.DAYS.between(start, end) <= 120) { "一次最多扫描 120 天" }
+        require(java.time.temporal.ChronoUnit.DAYS.between(start, end) <= 220) { "一次最多查询 220 天" }
         val result = mutableListOf<ScheduleEntry>()
         val seen = mutableSetOf<String>()
         var day = start
@@ -179,7 +179,9 @@ class SchoolApi {
                         id = identity("scut", auth.tenantId, auth.userId, courseId, subId),
                         groupId = identity("course", auth.tenantId, auth.userId, courseId),
                         title = course.optString("course_title", "未命名课程"),
-                        day = date, courseId = courseId, subId = subId
+                        day = date, courseId = courseId, subId = subId,
+                        startsAt = scheduleTimestamp(course.optString("start_at")),
+                        endsAt = scheduleTimestamp(course.optString("end_at"))
                     )
                 }
             }

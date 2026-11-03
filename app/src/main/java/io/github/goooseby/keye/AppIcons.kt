@@ -15,6 +15,7 @@ import androidx.compose.ui.unit.dp
 
 /** Original outline glyphs drawn on a shared 24-unit grid. */
 private val glyphs = mapOf(
+    "code" to "M8 6l-6 6 6 6 M16 6l6 6-6 6 M14 3l-4 18",
     "expand" to "M5 9l7 7 7-7",
     "brightness" to "M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0 M12 2v2 M12 20v2 M2 12h2 M20 12h2 M5 5l1.5 1.5 M17.5 17.5L19 19 M5 19l1.5-1.5 M17.5 6.5L19 5",
     "previous" to "M15 5l-7 7 7 7",

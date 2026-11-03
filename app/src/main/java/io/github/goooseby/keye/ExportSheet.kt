@@ -20,7 +20,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 
 @Composable
-fun ExportLocationRow() {
+fun ExportLocationRow(compact: Boolean=false) {
     val context=LocalContext.current
     val storage=remember { ExportStorage(context) }
     var label by remember { mutableStateOf(storage.location) }
@@ -29,7 +29,7 @@ fun ExportLocationRow() {
         if(uri!=null) runCatching { storage.setFolder(uri);label=storage.location;problem=null }.onFailure {problem="无法使用这个文件夹，请重新选择"}
     }
     Column {
-        PreferenceRow("folder","导出位置",label,onClick={chooser.launch(storage.folder)})
+        PreferenceRow("folder","导出位置",label,compact=compact,onClick={chooser.launch(storage.folder)})
         problem?.let {Text(it,Modifier.padding(horizontal=20.dp,vertical=8.dp),color=MaterialTheme.colorScheme.error,style=MaterialTheme.typography.bodySmall)}
     }
 }

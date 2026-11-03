@@ -43,3 +43,20 @@ interface ClassroomPageSource {
 
 internal fun classroomAppendTarget(following: Boolean,current: Int,count: Int): Int =
     if(count<=0) 0 else if(following) count-1 else current.coerceIn(0,count-1)
+
+/** Insert a backfilled page in catalogue order, preserving page-bound user data. */
+internal fun insertClassroomPage(material: StudyMaterial,page: PageFile,catalog: List<ClassroomPage>): StudyMaterial {
+    val order=catalog.map {it.key}
+    val rank=order.indexOf(page.remoteKey)
+    val insertion=material.pages.indexOfFirst {existing ->
+        val other=order.indexOf(existing.remoteKey)
+        rank>=0 && other>rank
+    }.let {if(it<0) material.pages.size else it}
+    fun shifted(number: Int)=if(number>insertion) number+1 else number
+    val pages=material.pages.toMutableList().apply {add(insertion,page)}
+    return material.copy(pages=pages,excluded=material.excluded.map(::shifted).toSet(),
+        bookmarks=material.bookmarks.map(::shifted).toSet(),
+        pageNotes=material.pageNotes.mapKeys {shifted(it.key)},
+        lastPage=if(material.pages.isEmpty()) 1 else shifted(material.lastPage),
+        revision=material.revision+1,touched=System.currentTimeMillis())
+}
