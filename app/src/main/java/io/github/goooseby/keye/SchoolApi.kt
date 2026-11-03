@@ -18,6 +18,8 @@ data class SchoolAuth(
     val tenantId: String
 )
 
+class SchoolSessionExpired : IllegalStateException("学校登录已失效，请重新登录")
+
 class SchoolApi {
     companion object {
         const val HOME = "https://video.jw.scut.edu.cn/"
@@ -88,6 +90,7 @@ class SchoolApi {
                 check(next.protocol == "https") { "课件图片只能跳转到 HTTPS 地址" }
                 return requestBytes(next.toString(), auth, timeoutSeconds, true, redirectCount + 1)
             }
+            if (auth!=null && isSchoolAuthenticationFailure(connection.url.host,status,connection.getHeaderField("Location"),imageRequest=followImageRedirects)) throw SchoolSessionExpired()
             if (status !in 200..299) {
                 throw IllegalStateException("平台请求失败（HTTP $status），请检查登录状态和网络")
             }
@@ -110,7 +113,7 @@ class SchoolApi {
             }
         } catch (error: Exception) {
             if (error is IllegalStateException) throw error
-            throw IllegalStateException("平台连接失败，请检查网络或重新登录", error)
+            throw IllegalStateException("暂时无法连接学校平台，请检查网络后重试", error)
         } finally {
             connection.disconnect()
         }
@@ -126,11 +129,18 @@ class SchoolApi {
             parameters.forEach { (key, value) -> appendQueryParameter(key, value) }
         }.build()
         val result = requestBytes(uri.toString(), auth, timeoutSeconds)
-        return try {
-            JSONObject(result.toString(Charsets.UTF_8))
-        } catch (_: Exception) {
-            throw IllegalStateException("平台返回了无法解析的数据，请重新登录")
-        }
+        val response=try {JSONObject(result.toString(Charsets.UTF_8))}
+        catch (_: Exception) {throw IllegalStateException("平台返回了无法解析的数据，请稍后重试")}
+        // Only explicit authentication errors invalidate a session. Empty results,
+        // server errors and expired CDN image links are not evidence of logout.
+        if(response.optString("code") in setOf("401","403") || response.optString("status") in setOf("401","403")) throw SchoolSessionExpired()
+        return response
+    }
+
+    fun verifySession(auth: SchoolAuth,timeoutSeconds: Int) {
+        // One day is sufficient to validate the authenticated schedule endpoint;
+        // an empty course list is a successful connection too.
+        scan(auth,LocalDate.now(),LocalDate.now(),timeoutSeconds)
     }
 
     fun scan(auth: SchoolAuth, start: LocalDate, end: LocalDate, timeoutSeconds: Int): List<ScheduleEntry> {
@@ -150,7 +160,7 @@ class SchoolApi {
                 ), auth, timeoutSeconds
             )
             val blocks = response.optJSONObject("result")?.optJSONArray("list")
-                ?: throw IllegalStateException("课表数据不完整，请重新登录")
+                ?: throw IllegalStateException("课表数据不完整，请稍后重试")
             for (index in 0 until blocks.length()) {
                 val block = blocks.getJSONObject(index)
                 val date = block.optString("day")

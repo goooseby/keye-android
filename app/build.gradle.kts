@@ -12,8 +12,21 @@ android {
         applicationId = "io.github.goooseby.keye"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = providers.gradleProperty("keyeVersionCode").orElse("2").get().toInt()
+        versionName = providers.gradleProperty("keyeVersionName").orElse("0.2.0").get()
+    }
+
+    val releaseStorePath = providers.environmentVariable("KEYE_KEYSTORE_PATH").orNull
+    if (!releaseStorePath.isNullOrBlank()) {
+        signingConfigs {
+            create("publication") {
+                storeFile = file(releaseStorePath)
+                storePassword = providers.environmentVariable("KEYE_KEYSTORE_PASSWORD").get()
+                keyAlias = providers.environmentVariable("KEYE_KEY_ALIAS").get()
+                keyPassword = providers.environmentVariable("KEYE_KEY_PASSWORD").get()
+            }
+        }
+        buildTypes.getByName("release").signingConfig = signingConfigs.getByName("publication")
     }
 
     buildFeatures {

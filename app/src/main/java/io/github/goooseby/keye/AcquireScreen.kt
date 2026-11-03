@@ -14,6 +14,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.state.ToggleableState
+import android.webkit.CookieManager
 import java.time.Instant
 import java.time.ZoneOffset
 import java.time.LocalDate
@@ -27,15 +31,26 @@ fun AcquireScreen(state: UiState,model: KeyeViewModel,onLogin: () -> Unit,onDown
     var start by remember(state.startDate){mutableStateOf(state.startDate)}
     var end by remember(state.endDate){mutableStateOf(state.endDate)}
     var selected by remember{mutableStateOf(emptySet<String>())}
+    var expanded by remember(state.schedule) {mutableStateOf(emptySet<String>())}
+    val groups=remember(state.schedule) {state.schedule.groupBy(ScheduleEntry::groupId)}
     LaunchedEffect(state.schedule,state.materials) {
         val available=state.schedule.filter{entry ->state.materials.none{it.sourceKey==entry.id}}.map(ScheduleEntry::id).toSet()
         selected=selected.intersect(available)
     }
     AnimatedContent(state.loggedIn,transitionSpec={fadeIn(tween(220)) togetherWith fadeOut(tween(150))},label="account state") { connected ->
         if(!connected) Box(Modifier.fillMaxSize(),contentAlignment=Alignment.Center) {
-            EmptyState("school","尚未连接学校平台",detail="登录后查询课表与课件",action="登录学校平台",onAction=onLogin,modifier=Modifier.padding(bottom=48.dp))
+            EmptyState("school",if(state.schoolConnection==SchoolConnection.Expired) "学校登录已失效" else "尚未登录学校平台",detail="登录后查询课表与课件，本机资料仍可阅读",action=if(state.schoolConnection==SchoolConnection.Expired) "重新登录" else "登录学校平台",onAction=onLogin,modifier=Modifier.padding(bottom=48.dp))
         } else Column(Modifier.fillMaxSize()) {
             LazyColumn(Modifier.weight(1f),contentPadding=PaddingValues(bottom=16.dp)) {
+                if(state.schoolConnection in setOf(SchoolConnection.Checking,SchoolConnection.Unverified)) item {
+                    Surface(Modifier.fillMaxWidth().padding(horizontal=20.dp,vertical=8.dp),shape=RoundedCornerShape(16.dp),color=MaterialTheme.colorScheme.surfaceContainer) {
+                        Row(Modifier.padding(start=14.dp,end=6.dp,top=6.dp,bottom=6.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(10.dp)) {
+                            if(state.schoolConnection==SchoolConnection.Checking) CircularProgressIndicator(Modifier.size(18.dp),strokeWidth=2.dp) else AppIcon("info",modifier=Modifier.size(20.dp))
+                            Text(if(state.schoolConnection==SchoolConnection.Checking) "正在验证学校登录" else "暂时无法验证连接，登录信息已保留",Modifier.weight(1f),style=MaterialTheme.typography.bodySmall)
+                            if(state.schoolConnection==SchoolConnection.Unverified) TextButton(onClick={model.checkSchoolSession(CookieManager.getInstance().getCookie(SchoolApi.HOME),force=true)}) {Text("重试")}
+                        }
+                    }
+                }
                 item {
                     Column(Modifier.padding(horizontal=20.dp,vertical=8.dp)) {
                         Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(6.dp)) {
@@ -50,21 +65,40 @@ fun AcquireScreen(state: UiState,model: KeyeViewModel,onLogin: () -> Unit,onDown
                             SuggestionChip(onClick={end=LocalDate.now().toString();start=LocalDate.now().minusDays(14).toString();model.scan(start,end)},enabled=!state.busy,label={Text("近两周")})
                             SuggestionChip(onClick={end=LocalDate.now().toString();start=LocalDate.now().minusDays(30).toString();model.scan(start,end)},enabled=!state.busy,label={Text("近一月")})
                             Spacer(Modifier.weight(1f))
-                            Text("${state.schedule.size} 节课",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("${groups.size} 门 · ${state.schedule.size} 节",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 }
                 if(state.schedule.isEmpty()) item {EmptyState(if(state.busy) "clock" else "calendar",if(state.busy) "正在查询课表" else "暂无课次",detail=if(state.busy) null else "选择日期范围后查询")}
-                state.schedule.groupBy(ScheduleEntry::groupId).forEach{(group,entries) ->
-                    item(key="header:$group") {
-                        val available=entries.filter{entry ->state.materials.none{it.sourceKey==entry.id}}.map(ScheduleEntry::id).toSet()
-                        Row(Modifier.fillMaxWidth().padding(start=20.dp,end=8.dp,top=4.dp),verticalAlignment=Alignment.CenterVertically) {
-                            Text(entries.first().title,Modifier.weight(1f),style=MaterialTheme.typography.titleSmall,maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-                            Text("${entries.size} 节",Modifier.padding(horizontal=6.dp),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
-                            Checkbox(checked=available.isNotEmpty()&&selected.containsAll(available),onCheckedChange={selected=if(it) selected+available else selected-available},enabled=available.isNotEmpty(),modifier=Modifier.semantics{contentDescription="全选${entries.first().title}"})
+                if(groups.isNotEmpty()) item {
+                    Row(Modifier.fillMaxWidth().padding(start=20.dp,end=12.dp),verticalAlignment=Alignment.CenterVertically) {
+                        Text("课程",Modifier.weight(1f),style=MaterialTheme.typography.labelLarge,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                        val allExpanded=expanded.containsAll(groups.keys)
+                        TextButton(onClick={expanded=if(allExpanded) emptySet() else groups.keys.toSet()}) {
+                            AppIcon("expand",modifier=Modifier.size(18.dp).graphicsLayer {rotationZ=if(allExpanded) 180f else 0f})
+                            Spacer(Modifier.width(6.dp));Text(if(allExpanded) "全部折叠" else "全部展开")
                         }
                     }
-                    items(entries,key=ScheduleEntry::id){entry ->
+                }
+                groups.forEach{(group,entries) ->
+                    item(key="header:$group") {
+                        val available=entries.filter{entry ->state.materials.none{it.sourceKey==entry.id}}.map(ScheduleEntry::id).toSet()
+                        val open=group in expanded
+                        val chosen=entries.count {it.id in selected}
+                        val rotation by animateFloatAsState(if(open) 90f else 0f,tween(180),label="course expansion")
+                        Row(Modifier.fillMaxWidth().animateItem().clickable {expanded=if(open) expanded-group else expanded+group}
+                            .semantics {stateDescription=if(open) "已展开" else "已折叠"}
+                            .heightIn(min=64.dp).padding(start=20.dp,end=8.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(10.dp)) {
+                            AppIcon("next",modifier=Modifier.size(18.dp).graphicsLayer {rotationZ=rotation})
+                            Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(2.dp)) {
+                                Text(entries.first().title,style=MaterialTheme.typography.titleSmall,maxLines=1,overflow=androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                                Text("${entries.size} 节"+if(chosen>0) " · 已选 $chosen 节" else "",style=MaterialTheme.typography.bodySmall,color=if(chosen>0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            TriStateCheckbox(state=when {available.isNotEmpty()&&selected.containsAll(available) ->ToggleableState.On;available.any {it in selected} ->ToggleableState.Indeterminate;else ->ToggleableState.Off},
+                                onClick={selected=if(selected.containsAll(available)) selected-available else selected+available},enabled=available.isNotEmpty(),modifier=Modifier.semantics{contentDescription="全选${entries.first().title}"})
+                        }
+                    }
+                    if(group in expanded) items(entries,key=ScheduleEntry::id){entry ->
                         val downloaded=state.materials.any{it.sourceKey==entry.id}
                         val checked=entry.id in selected
                         val tone by animateColorAsState(if(checked) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,label="lecture selection")

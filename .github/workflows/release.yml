@@ -1,0 +1,91 @@
+name: Build signed release draft
+
+on:
+  workflow_dispatch:
+    inputs:
+      notes:
+        description: Release notes shown in the app
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: keye-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Restore private signing key
+        env:
+          KEYE_KEYSTORE_BASE64: ${{ secrets.KEYE_KEYSTORE_BASE64 }}
+          KEYE_KEYSTORE_PASSWORD: ${{ secrets.KEYE_KEYSTORE_PASSWORD }}
+          KEYE_KEY_ALIAS: ${{ secrets.KEYE_KEY_ALIAS }}
+          KEYE_KEY_PASSWORD: ${{ secrets.KEYE_KEY_PASSWORD }}
+        run: |
+          python3 - <<'PY'
+          import base64, os
+          from pathlib import Path
+          for name in ('KEYE_KEYSTORE_BASE64', 'KEYE_KEYSTORE_PASSWORD', 'KEYE_KEY_ALIAS', 'KEYE_KEY_PASSWORD'):
+              if not os.environ.get(name):
+                  raise SystemExit(f'Missing repository secret: {name}')
+          path = Path(os.environ['RUNNER_TEMP']) / 'keye-signing.p12'
+          path.write_bytes(base64.b64decode(''.join(os.environ['KEYE_KEYSTORE_BASE64'].split()), validate=True))
+          path.chmod(0o600)
+          PY
+      - name: Install Android build tools
+        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Check and build signed APK
+        env:
+          KEYE_KEYSTORE_PATH: ${{ runner.temp }}/keye-signing.p12
+          KEYE_KEYSTORE_PASSWORD: ${{ secrets.KEYE_KEYSTORE_PASSWORD }}
+          KEYE_KEY_ALIAS: ${{ secrets.KEYE_KEY_ALIAS }}
+          KEYE_KEY_PASSWORD: ${{ secrets.KEYE_KEY_PASSWORD }}
+        run: ./gradlew :app:testDebugUnitTest :app:lintRelease :app:assembleRelease --no-daemon
+      - name: Verify release package
+        id: package
+        env:
+          RELEASE_NOTES: ${{ inputs.notes }}
+        run: |
+          mkdir -p dist
+          cp app/build/outputs/apk/release/app-release.apk dist/keye-android.apk
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose dist/keye-android.apk
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging dist/keye-android.apk > "$RUNNER_TEMP/apk-badging.txt"
+          python3 - <<'PY'
+          import os, re
+          from pathlib import Path
+          text = (Path(os.environ['RUNNER_TEMP']) / 'apk-badging.txt').read_text()
+          match = re.search(r"package: name='([^']+)' versionCode='([0-9]+)' versionName='([^']+)'", text)
+          if not match or match[1] != 'io.github.goooseby.keye':
+              raise SystemExit('Unexpected APK package')
+          if not re.fullmatch(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)', match[3]):
+              raise SystemExit('Release version must use major.minor.patch')
+          if 'application-debuggable' in text:
+              raise SystemExit('Debuggable packages must not be published')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f'tag=v{match[3]}\n')
+          Path('dist/release-notes.md').write_text(os.environ['RELEASE_NOTES'], encoding='utf-8')
+          PY
+          (cd dist && sha256sum keye-android.apk > SHA256SUMS)
+      - name: Create reviewable GitHub Release draft
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.package.outputs.tag }}
+        run: |
+          gh release create "$TAG" dist/keye-android.apk dist/SHA256SUMS \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "Keye $TAG" --notes-file dist/release-notes.md --draft

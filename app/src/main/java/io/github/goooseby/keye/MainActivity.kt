@@ -23,13 +23,25 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.delay
 import java.io.File
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        setContent { KeyeTheme { KeyeApp(viewModel(), {File(filesDir,it)}) } }
+        handleUpdateIntent(intent)
+        setContent { KeyeTheme { KeyeApp(viewModel(), {File(filesDir,it)},viewModel()) } }
+    }
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent);setIntent(intent);handleUpdateIntent(intent)
+    }
+    private fun handleUpdateIntent(intent: Intent?) {
+        if(intent?.action==UPDATE_ACTION) ViewModelProvider(this)[AppUpdateViewModel::class.java].showDetails()
     }
 }
 private enum class Section(val title: String,val short: String,val icon: String) {
@@ -43,8 +55,9 @@ private data class Destination(val section: Section,val course: String?,val mate
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun KeyeApp(model: KeyeViewModel,mediaPath: (String) -> File) {
+private fun KeyeApp(model: KeyeViewModel,mediaPath: (String) -> File,updates: AppUpdateViewModel) {
     val state by model.state.collectAsState()
+    val updateState by updates.state.collectAsState()
     val context=LocalContext.current
     val screens=rememberSaveableStateHolder()
     var section by rememberSaveable{mutableStateOf(Section.Library)}
@@ -73,17 +86,24 @@ private fun KeyeApp(model: KeyeViewModel,mediaPath: (String) -> File) {
         pendingImportCourseId=destination
         importLauncher.launch(arrayOf("image/*","application/pdf"))
     }
-    fun requestLogin() {
-        if(state.loggedIn) {
-            model.logout()
-            CookieManager.getInstance().removeAllCookies{loginOpen=true}
-        } else loginOpen=true
-    }
+    fun requestLogin() {loginOpen=true}
     fun goBack() {if(materialId!=null) materialId=null else if(courseId!=null) courseId=null else section=if(section==Section.Tasks) tasksOrigin else Section.Library}
-    LaunchedEffect(Unit) {
-        SchoolApi.authFromCookies(CookieManager.getInstance().getCookie(SchoolApi.HOME))?.let{model.login(it.cookie,silent=true)}
+    val lifecycleOwner=LocalLifecycleOwner.current
+    LaunchedEffect(lifecycleOwner,loginOpen) {
+        if(!loginOpen) lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            var first=true
+            while(true) {
+                model.checkSchoolSession(CookieManager.getInstance().getCookie(SchoolApi.HOME),force=first)
+                first=false;delay(60_000)
+            }
+        }
+    }
+    LaunchedEffect(section,loginOpen) {
+        if(!loginOpen && section in setOf(Section.Acquire,Section.Settings))
+            model.checkSchoolSession(CookieManager.getInstance().getCookie(SchoolApi.HOME))
     }
     LaunchedEffect(state.notice) {state.notice?.let{snackbar.showSnackbar(it);if(model.state.value.notice==it) model.notice(null)}}
+    AppUpdateHost(updates,canPrompt=materialId==null && !loginOpen && exportIds.isEmpty() && !state.loading)
     if(exportIds.isNotEmpty()) {
         val materials=exportIds.mapNotNull { id ->state.materials.firstOrNull { it.id==id } }
         if(materials.isNotEmpty()) ExportSheet(materials,shareOnly,onDismiss={exportIds=emptyList()},onSubmit={model.export(it.copy(origin=materialId?:section.name));exportIds=emptyList()})
@@ -160,7 +180,11 @@ private fun KeyeApp(model: KeyeViewModel,mediaPath: (String) -> File) {
                     route.section==Section.Tasks -> TasksScreen(state.tasks,model,onOpen={id ->
                         if(state.materials.any{it.id==id&&!it.deleted}) materialId=id else model.notice("课件已在回收站")
                     },onOutput={uri ->runCatching{context.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(uri),"application/pdf").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))}.onFailure{model.notice("无法打开文件，请确认文件仍存在且已安装 PDF 阅读器")}})
-                    route.section==Section.Settings -> SettingsScreen(state,model,{requestLogin()},onTasks={tasksOrigin=Section.Settings;section=Section.Tasks},onTrash={libraryTrash=true;section=Section.Library})
+                    route.section==Section.Settings -> SettingsScreen(state,model,{requestLogin()},onTasks={tasksOrigin=Section.Settings;section=Section.Tasks},onTrash={libraryTrash=true;section=Section.Library},onUpdates={updates.showDetails()},updateStatus=when(updateState.download.stage) {
+                        UpdateDownloadStage.Downloading ->updateState.download.message
+                        UpdateDownloadStage.Ready ->"${updateState.release?.version} 已下载，点击安装"
+                        else ->updateState.release?.let {"发现新版本 ${it.version}"}
+                    })
                 }
             }
         }

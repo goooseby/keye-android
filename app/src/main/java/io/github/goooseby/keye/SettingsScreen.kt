@@ -11,12 +11,15 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(state: UiState,model: KeyeViewModel,onLogin: () -> Unit,onTasks: () -> Unit={},onTrash: () -> Unit={}) {
+fun SettingsScreen(state: UiState,model: KeyeViewModel,onLogin: () -> Unit,onTasks: () -> Unit={},onTrash: () -> Unit={},onUpdates: () -> Unit={},updateStatus: String?=null) {
+    val context=LocalContext.current
+    val currentVersion=remember {context.packageManager.getPackageInfo(context.packageName,0).versionName.orEmpty()}
     var networkOpen by remember{mutableStateOf(false)}
     var confirmLogout by remember{mutableStateOf(false)}
     LazyColumn(contentPadding=PaddingValues(20.dp,12.dp,20.dp,28.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
@@ -26,11 +29,16 @@ fun SettingsScreen(state: UiState,model: KeyeViewModel,onLogin: () -> Unit,onTas
                     IconBadge("school",Modifier.size(54.dp))
                     Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(6.dp)) {
                         Text("学校平台",style=MaterialTheme.typography.titleMedium)
-                        StatusPill(if(state.loggedIn) "已连接" else "未登录",if(state.loggedIn) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                        StatusPill(schoolConnectionLabel(state.schoolConnection),if(state.schoolConnection==SchoolConnection.Expired) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary)
                     }
-                    if(!state.loggedIn) FilledTonalButton(onClick=onLogin,shape=RoundedCornerShape(12.dp)){Text("登录")}
+                    if(!state.loggedIn) FilledTonalButton(onClick=onLogin,shape=RoundedCornerShape(12.dp)){Text(if(state.schoolConnection==SchoolConnection.Expired) "重新登录" else "登录")}
                     else IconButton(onClick={confirmLogout=true}){AppIcon("logout","退出登录")}
                 }
+            }
+        }
+        if(state.schoolConnection==SchoolConnection.Unverified) item {
+            Surface(shape=RoundedCornerShape(20.dp),color=MaterialTheme.colorScheme.surfaceContainer) {
+                PreferenceRow("refresh","重新检查学校连接","登录信息已保留，无需因断网退出账号",onClick={model.checkSchoolSession(CookieManager.getInstance().getCookie(SchoolApi.HOME),force=true)})
             }
         }
         item{Surface(shape=RoundedCornerShape(20.dp),color=MaterialTheme.colorScheme.surfaceContainer){PreferenceRow("tasks","下载管理",onClick=onTasks)}}
@@ -54,7 +62,7 @@ fun SettingsScreen(state: UiState,model: KeyeViewModel,onLogin: () -> Unit,onTas
         }
         item{Text("卸载应用前，请先导出需要保留的课件。",Modifier.padding(horizontal=6.dp),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)}
         item{SectionLabel("关于")}
-        item{Surface(shape=RoundedCornerShape(20.dp),color=MaterialTheme.colorScheme.surfaceContainer){PreferenceRow("info","课页",value="0.1.0")}}
+        item{Surface(shape=RoundedCornerShape(20.dp),color=MaterialTheme.colorScheme.surfaceContainer){PreferenceRow("refresh","应用更新",subtitle=updateStatus?:"当前版本 $currentVersion",onClick=onUpdates)}}
     }
     if(confirmLogout) AlertDialog(onDismissRequest={confirmLogout=false},icon={AppIcon("logout")},title={Text("退出学校登录？")},text={Text("本机课件与阅读进度会保留。")},confirmButton={TextButton(onClick={CookieManager.getInstance().removeAllCookies(null);CookieManager.getInstance().flush();model.logout();confirmLogout=false}){Text("退出")}},dismissButton={TextButton(onClick={confirmLogout=false}){Text("取消")}})
     if(networkOpen) {

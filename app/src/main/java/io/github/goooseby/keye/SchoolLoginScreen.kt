@@ -12,6 +12,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 @Composable
 fun SchoolLoginScreen(model: KeyeViewModel, onClose: () -> Unit) {
@@ -19,13 +20,27 @@ fun SchoolLoginScreen(model: KeyeViewModel, onClose: () -> Unit) {
     var progress by remember { mutableFloatStateOf(0f) }
     var failure by remember { mutableStateOf(false) }
     var hint by remember { mutableStateOf<String?>(null) }
+    var checking by remember {mutableStateOf(false)}
+    val scope=rememberCoroutineScope()
+    suspend fun completeLogin(cookie: String) {
+        if(checking) return
+        checking=true
+        try {
+            if(model.login(cookie)) onClose()
+            else hint=model.state.value.notice ?: "请先在学校页面完成登录"
+        } finally {checking=false}
+    }
     BackHandler { if (browser?.canGoBack() == true) browser?.goBack() else onClose() }
     val context = LocalContext.current
     LaunchedEffect(Unit) {
+        var lastCookie:String?=null
         while (true) {
             delay(1000)
             val cookie = CookieManager.getInstance().getCookie(SchoolApi.HOME)
-            if (SchoolApi.authFromCookies(cookie) != null && model.login(cookie!!)) { onClose(); break }
+            if(cookie!=lastCookie && SchoolApi.authFromCookies(cookie)!=null && !checking) {
+                lastCookie=cookie
+                completeLogin(cookie!!)
+            }
         }
     }
     val animatedProgress by animateFloatAsState(progress,tween(250),label="login progress")
@@ -35,10 +50,7 @@ fun SchoolLoginScreen(model: KeyeViewModel, onClose: () -> Unit) {
                 IconButton(onClick = onClose) { AppIcon("back", "返回") }
                 Text("学校登录", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
                 IconButton(onClick = { failure = false; browser?.reload() }) { AppIcon("refresh", "刷新登录页") }
-                TextButton(onClick = {
-                    if (model.login(CookieManager.getInstance().getCookie(SchoolApi.HOME).orEmpty())) onClose()
-                    else hint = "请先在学校页面完成登录"
-                }) { Text("完成") }
+                TextButton(enabled=!checking,onClick={scope.launch {completeLogin(CookieManager.getInstance().getCookie(SchoolApi.HOME).orEmpty())}}) {Text(if(checking) "验证中" else "完成")}
             }
         }
         hint?.let { Text(it, Modifier.padding(horizontal = 16.dp, vertical = 8.dp),

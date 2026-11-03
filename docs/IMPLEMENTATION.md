@@ -36,11 +36,19 @@ SQLite 为应用私有目录 databases/keye-library.sqlite，原件与预览为 
 
 ## 学校与任务
 
-学校 Cookie 解析为内存凭据，系统 WebView 可能保存 Cookie；退出或重新登录会清除 Cookie。凭据只附加到学校主域名请求，图片地址和跳转仅接受 HTTPS。课表查询使用请求序号与协程取消，忽略已被新请求或退出登录替代的结果。
+学校 Cookie 解析为内存凭据，系统 WebView 可能保存 Cookie；只有用户主动退出才清除 Cookie；自动检测失效、网络失败和打开登录页均保留 Cookie，成功登录调用 flush 保存学校提供的有效期。凭据只附加到学校主域名请求，图片地址和跳转仅接受 HTTPS。SchoolConnection 表达五种连接状态；MainActivity 在 RESUMED 生命周期内检查并每 60 秒复核，进入获取／我的也触发带 60 秒节流的检查。使用当天课表接口验证（没有课次也有效），验证超时最多 15 秒。401／403、明确的登录重定向和 JSON 认证错误转换为 SchoolSessionExpired；CDN 图片失败、超时、服务器错误及无效响应只报告连接问题，不删除凭据。已被平台拒绝的同一 Cookie 不反复标为已连接，需新的 Cookie 或登录页面再次验证成功。学校登录页面轮询新 Cookie 并验证，手动完成可重试。
+
+认证失败同步清除内存中的有效状态和旧查询结果，本机课件保持可读。异步验证和课表查询分别使用序号与协程取消，忽略已被新请求或退出登录替代的结果。AcquireScreen 的展开集合属于当前查询结果，初始为空，支持单门和全组开合；选择集合独立保存，折叠不清除选择。
 
 下载最多同时两项，同一课次不重复排队；本地导入最多一项。整批等待任务通过 SQLite 事务保存并一次发布后启动工作协程；mergeTaskBatch 按 ID 去重。队列按不可变 createdAt、batchOrder 排序，updatedAt 只表达状态更新时间。AnimatedTaskQueue 保留正在退出的展示行，单个 AnimatedVisibility 负责水平位移、淡出和高度收拢，不叠加 LazyColumn 的 placement 动画。下载重试需要来源学校账号。退出登录取消下载和查询，保留已下载内容；离线阅读和导出无需登录。
 
 导入保留来源 URI 授权，支持取消及重试。原件被移动或授权失效时提示重新选择。任务在进程中运行，中断后下次启动标记失败。
+
+## 应用更新
+
+AppUpdateManager 独立管理公开 GitHub Releases 元数据、ETag、每日检查记录、忽略偏好、DownloadManager 任务和安装包。UpdatePolicy 使用纯逻辑验证稳定版本、每日门限、仓库地址和签名集合。AppUpdateViewModel 用互斥锁串行恢复、下载、校验与安装准备，不将系统下载任务绑定到界面生命周期；AppUpdateHost 仅在前台查询本机下载状态，不借轮询请求 GitHub。
+
+下载完成后的私有副本通过大小、SHA-256、包名、版本、最低系统和签名校验，安装前再次复核。UpdateDownloadReceiver 只查询匹配任务并发送完成通知，真正安装由前台 MainActivity 处理。拒绝权限和取消安装不会删除有效安装包。应用更新的任务与课件下载独立，不能清理课程文件。签名配置仅从环境变量读取；正式发布流程及检查边界见 [UPDATES.md](UPDATES.md)。
 
 ## 能力边界
 

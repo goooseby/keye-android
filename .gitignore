@@ -25,3 +25,6 @@ keystore.properties
 *.apks
 *.log
 Thumbs.db
+
+# Publication output
+dist/

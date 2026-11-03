@@ -34,6 +34,7 @@ data class UiState(
     val schedule: List<ScheduleEntry> = emptyList(),
     val settings: AppSettings = AppSettings(),
     val loggedIn: Boolean = false,
+    val schoolConnection: SchoolConnection = SchoolConnection.SignedOut,
     val busy: Boolean = false,
     val notice: String? = null,
     val startDate: String = LocalDate.now().minusDays(14).toString(),
@@ -45,6 +46,10 @@ class KeyeViewModel(application: Application) : AndroidViewModel(application) {
     private val media = MediaLibrary(application)
     private val school = SchoolApi()
     @Volatile private var auth: SchoolAuth? = null
+    private var sessionJob: Job? = null
+    private val sessionSequence=java.util.concurrent.atomic.AtomicLong()
+    private var lastSessionCheck=0L
+    @Volatile private var rejectedCookie:String?=null
     private var scanJob: Job? = null
     private val scanSequence = java.util.concurrent.atomic.AtomicLong()
     private val jobs = ConcurrentHashMap<String, Job>()
@@ -112,31 +117,90 @@ class KeyeViewModel(application: Application) : AndroidViewModel(application) {
         mutableState.update { it.copy(notice = message) }
     }
 
-    fun login(cookie: String,silent: Boolean=false): Boolean {
-        val credentials = SchoolApi.authFromCookies(cookie)
-        if (credentials == null) {
-            notice("还没有识别到完整登录状态，请在网页中完成登录")
+    suspend fun login(cookie: String,silent: Boolean=false): Boolean {
+        val credentials=SchoolApi.authFromCookies(cookie)
+        if(credentials==null) {
+            if(!silent) notice("还没有识别到有效登录状态，请在学校页面完成登录")
             return false
         }
-        auth = credentials
-        mutableState.update { it.copy(loggedIn = true, notice = if(silent) null else "已连接学校课堂平台") }
-        return true
+        sessionJob?.cancel()
+        val sequence=sessionSequence.incrementAndGet()
+        mutableState.update {it.copy(schoolConnection=SchoolConnection.Checking)}
+        return try {
+            withContext(Dispatchers.IO) {school.verifySession(credentials,state.value.settings.timeoutSeconds.coerceAtMost(15))}
+            if(sequence!=sessionSequence.get()) return false
+            auth=credentials;rejectedCookie=null
+            lastSessionCheck=android.os.SystemClock.elapsedRealtime()
+            android.webkit.CookieManager.getInstance().flush()
+            mutableState.update {it.copy(loggedIn=true,schoolConnection=SchoolConnection.Connected,notice=if(silent) null else "已连接学校课堂平台")}
+            true
+        } catch(error: CancellationException) {throw error}
+        catch(error: Exception) {
+            if(sequence==sessionSequence.get()) {
+                if(error is SchoolSessionExpired) {
+                    rejectedCookie=credentials.cookie;auth=null
+                    mutableState.update {it.copy(loggedIn=false,schoolConnection=SchoolConnection.Expired,schedule=emptyList(),busy=false)}
+                } else mutableState.update {it.copy(schoolConnection=SchoolConnection.Unverified)}
+                if(!silent) notice(error.message ?: "暂时无法验证登录，请稍后重试")
+            }
+            false
+        }
+    }
+
+    fun checkSchoolSession(cookie: String?,force: Boolean=false) {
+        if(sessionJob?.isActive==true) return
+        val credentials=SchoolApi.authFromCookies(cookie)
+        if(credentials==null) {
+            if(auth!=null || hasSchoolLoginCookie(cookie)) {
+                auth=null
+                mutableState.update {it.copy(loggedIn=false,schoolConnection=SchoolConnection.Expired,schedule=emptyList(),busy=false)}
+            }
+            return
+        }
+        if(credentials.cookie==rejectedCookie) return
+        if(!force && credentials==auth && android.os.SystemClock.elapsedRealtime()-lastSessionCheck<60_000) return
+        val sequence=sessionSequence.incrementAndGet()
+        auth=credentials
+        lastSessionCheck=android.os.SystemClock.elapsedRealtime()
+        mutableState.update {it.copy(loggedIn=true,schoolConnection=
+            if(it.schoolConnection in setOf(SchoolConnection.Connected,SchoolConnection.Unverified)) it.schoolConnection else SchoolConnection.Checking)}
+        sessionJob=viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {school.verifySession(credentials,state.value.settings.timeoutSeconds.coerceAtMost(15))}
+                if(sequence==sessionSequence.get() && auth==credentials) mutableState.update {it.copy(schoolConnection=SchoolConnection.Connected)}
+            } catch(error: CancellationException) {throw error}
+            catch(error: Exception) {
+                if(sequence==sessionSequence.get() && auth==credentials) {
+                    if(error is SchoolSessionExpired) expireSchoolSession(credentials)
+                    else mutableState.update {it.copy(schoolConnection=SchoolConnection.Unverified)}
+                }
+            }
+        }
+    }
+
+    private fun expireSchoolSession(credentials: SchoolAuth) {
+        if(auth!=credentials) return
+        sessionSequence.incrementAndGet()
+        rejectedCookie=credentials.cookie;auth=null
+        mutableState.update {it.copy(loggedIn=false,schoolConnection=SchoolConnection.Expired,busy=false,schedule=emptyList(),notice="学校登录已失效，请重新登录")}
+        // CookieManager is intentionally untouched: only an explicit sign-out
+        // removes cookies, so the school login page may still reuse its SSO.
     }
 
     fun logout() {
-        scanSequence.incrementAndGet()
-        scanJob?.cancel()
-        state.value.tasks.filter { it.type == "download" }.forEach { jobs[it.id]?.cancel() }
-        auth = null
-        mutableState.update { it.copy(loggedIn = false, busy = false, schedule = emptyList(), notice = "已断开平台连接") }
+        sessionSequence.incrementAndGet();sessionJob?.cancel()
+        scanSequence.incrementAndGet();scanJob?.cancel()
+        state.value.tasks.filter {it.type=="download"}.forEach {jobs[it.id]?.cancel()}
+        auth=null;rejectedCookie=null
+        mutableState.update {it.copy(loggedIn=false,schoolConnection=SchoolConnection.SignedOut,busy=false,schedule=emptyList(),notice="已退出学校登录")}
     }
 
     fun scan(startText: String, endText: String) {
         val sequence = scanSequence.incrementAndGet()
         scanJob?.cancel()
+        val credentials=auth ?: run {notice("请先登录学校平台");return}
         scanJob = viewModelScope.launch(Dispatchers.IO) {
             try {
-                val credentials = auth ?: error("请先登录学校平台")
                 val start = runCatching { LocalDate.parse(startText) }.getOrElse { error("开始日期无效") }
                 val end = runCatching { LocalDate.parse(endText) }.getOrElse { error("结束日期无效") }
                 require(!end.isBefore(start)) { "开始日期不能晚于结束日期" }
@@ -148,11 +212,14 @@ class KeyeViewModel(application: Application) : AndroidViewModel(application) {
                 entries.distinctBy(ScheduleEntry::groupId).filter { it.groupId !in known }
                     .forEach { store.put(Course(id = it.groupId, title = it.title)) }
                 refreshLibrary()
-                mutableState.update { it.copy(schedule = entries, notice = "找到 ${entries.size} 节课") }
+                mutableState.update { it.copy(schedule = entries, schoolConnection=SchoolConnection.Connected, notice = "找到 ${entries.size} 节课") }
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
-                if (sequence == scanSequence.get()) notice(error.message ?: "查询失败")
+                if (sequence == scanSequence.get()) {
+                    if(error is SchoolSessionExpired) expireSchoolSession(credentials)
+                    else notice(error.message ?: "查询失败")
+                }
             } finally {
                 if (sequence == scanSequence.get()) mutableState.update { it.copy(busy = false) }
             }
@@ -331,6 +398,7 @@ class KeyeViewModel(application: Application) : AndroidViewModel(application) {
             val pages = mutableListOf<PageFile>()
             urls.forEachIndexed { index, url ->
                 coroutineContext.ensureActive()
+                if(auth!=credentials) throw CancellationException("学校账号已断开")
                 var pageFile: PageFile? = null
                 var failure: Exception? = null
                 for (attempt in 1..settings.retryCount) {
@@ -343,6 +411,7 @@ class KeyeViewModel(application: Application) : AndroidViewModel(application) {
                     } catch (error: CancellationException) {
                         throw error
                     } catch (error: Exception) {
+                        if(error is SchoolSessionExpired) throw error
                         failure = error
                         if (attempt < settings.retryCount) kotlinx.coroutines.delay(300L * attempt)
                     }
@@ -367,6 +436,7 @@ class KeyeViewModel(application: Application) : AndroidViewModel(application) {
                 message = "下载完成", materialId = savedMaterial.id)
             else task.copy(status = "cancelled", message = "已取消"))
         } catch (error: Exception) {
+            if(error is SchoolSessionExpired) expireSchoolSession(credentials)
             if (savedMaterial == null) media.removeIncomplete(task.id)
             putTask(if (savedMaterial != null) task.copy(status = "done", progress = 100,
                 message = "下载完成", materialId = savedMaterial.id)
