@@ -47,8 +47,37 @@ jobs:
           path.write_bytes(base64.b64decode(''.join(os.environ['KEYE_KEYSTORE_BASE64'].split()), validate=True))
           path.chmod(0o600)
           PY
+      - name: Set up Android command-line tools
+        run: |
+          python3 - <<'PY'
+          import hashlib, os, shutil, urllib.request, zipfile
+          from pathlib import Path
+          root = Path(os.environ['RUNNER_TEMP']) / 'android-sdk'
+          archive = Path(os.environ['RUNNER_TEMP']) / 'android-tools.zip'
+          urllib.request.urlretrieve('https://dl.google.com/android/repository/commandlinetools-linux-15859902_latest.zip', archive)
+          expected = '4e4c464f145a7512b57d088ac6c278c03c9eea610886b35a5e0804e74eedf583'
+          if hashlib.sha256(archive.read_bytes()).hexdigest() != expected:
+              raise SystemExit('Android command-line tools checksum mismatch')
+          unpack = Path(os.environ['RUNNER_TEMP']) / 'android-tools-unpack'
+          with zipfile.ZipFile(archive) as tools:
+              tools.extractall(unpack)
+          (root / 'cmdline-tools').mkdir(parents=True, exist_ok=True)
+          shutil.move(str(unpack / 'cmdline-tools'), str(root / 'cmdline-tools' / 'latest'))
+          for tool in (root / 'cmdline-tools' / 'latest' / 'bin').iterdir():
+              tool.chmod(0o755)
+          with open(os.environ['GITHUB_ENV'], 'a') as output:
+              output.write(f'ANDROID_HOME={root}\nANDROID_SDK_ROOT={root}\n')
+          with open(os.environ['GITHUB_PATH'], 'a') as output:
+              output.write(f'{root}/cmdline-tools/latest/bin\n{root}/platform-tools\n')
+          PY
       - name: Install Android build tools
-        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+        run: |
+          python3 - <<'PY'
+          import os, subprocess
+          sdkmanager = os.path.join(os.environ['ANDROID_HOME'], 'cmdline-tools', 'latest', 'bin', 'sdkmanager')
+          subprocess.run([sdkmanager, '--licenses'], input='y\n' * 100, text=True, stdout=subprocess.DEVNULL, check=True)
+          subprocess.run([sdkmanager, 'platform-tools', 'platforms;android-36', 'build-tools;36.0.0'], check=True)
+          PY
       - name: Check and build signed APK
         env:
           KEYE_KEYSTORE_PATH: ${{ runner.temp }}/keye-signing.p12
