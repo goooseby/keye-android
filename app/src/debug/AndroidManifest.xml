@@ -1,1 +1,1 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"><application><activity android:name=".UiGalleryActivity" android:exported="true" android:label="课页界面检查" /></application></manifest>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"><application><activity android:name=".UiGalleryActivity" android:exported="true" android:label="课页界面检查" /><activity android:name=".ClassroomDemoActivity" android:exported="true" android:launchMode="singleTop" /></application></manifest>

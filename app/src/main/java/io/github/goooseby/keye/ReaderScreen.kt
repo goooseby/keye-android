@@ -45,7 +45,7 @@ import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class,ExperimentalFoundationApi::class,FlowPreview::class)
 @Composable
-fun ReaderScreen(material: StudyMaterial,model: KeyeViewModel,mediaPath: (String) -> File,onBack: () -> Unit,onExport: () -> Unit,onShare: () -> Unit,exportState: ExportState?) {
+fun ReaderScreen(material: StudyMaterial,model: KeyeViewModel,mediaPath: (String) -> File,onBack: () -> Unit,onExport: () -> Unit,onShare: () -> Unit,exportState: ExportState?,onClassroom: ((ScheduleEntry)->Unit)?=null) {
     if(material.pages.isEmpty()) { EmptyState("error","课件没有可读取的页面",action="返回",onAction=onBack);return }
     val context=LocalContext.current
     val activity=context as Activity
@@ -185,6 +185,7 @@ fun ReaderScreen(material: StudyMaterial,model: KeyeViewModel,mediaPath: (String
                     Box {
                         IconButton(onClick={menu=true}){AppIcon("more","阅读工具")}
                         DropdownMenu(menu,{menu=false}) {
+                            material.schoolEntry?.let {entry ->if(onClassroom!=null) DropdownMenuItem(text={Text("课堂跟看")},leadingIcon={AppIcon("live")},onClick={menu=false;onClassroom(entry)})}
                             DropdownMenuItem(text={Text("阅读工具")},leadingIcon={AppIcon("tools")},onClick={menu=false;panel="tools"})
                             DropdownMenuItem(text={Text("导出 PDF")},leadingIcon={AppIcon("export")},onClick={menu=false;onExport()})
                             DropdownMenuItem(text={Text(if(current+1 in material.bookmarks) "移除本页书签" else "添加本页书签")},leadingIcon={AppIcon("bookmark")},onClick={menu=false;model.bookmark(material.id,current+1)})
@@ -235,11 +236,13 @@ fun ReaderScreen(material: StudyMaterial,model: KeyeViewModel,mediaPath: (String
             }
         }
     }
+    if(panel=="note") PageNoteSheet(material,current+1,model) {panel=null}
     if(panel=="tools") ModalBottomSheet(onDismissRequest={panel=null},sheetState=rememberModalBottomSheetState(skipPartiallyExpanded=true)) {
         Column(Modifier.verticalScroll(rememberScrollState()).padding(start=20.dp,end=20.dp,bottom=24.dp),verticalArrangement=Arrangement.spacedBy(14.dp)) {
             SheetHeading("阅读工具",{panel=null})
             ReaderToolGroup("阅读",listOf(
                 ReaderTool("settings","查看设置") {panel="view"},
+                ReaderTool("edit","本页批注") {panel="note"},
                 ReaderTool("fit","还原缩放") {resetToken++;panel=null},
                 ReaderTool("first","回到首页") {resetToken++;jump(visibleIndices.first());panel=null},
                 ReaderTool("last","前往末页") {resetToken++;jump(visibleIndices.last());panel=null}))
@@ -392,9 +395,9 @@ private data class ReaderBitmap(val bitmap: Bitmap?=null,val finished: Boolean=f
 private val readerCache=object:android.util.LruCache<String,Bitmap>(40*1024*1024) {override fun sizeOf(key:String,value:Bitmap)=value.allocationByteCount}
 
 @Composable
-private fun ReaderCanvas(page: PageFile,mediaPath: (String) -> File,modifier: Modifier,pageNumber: Int,continuous: Boolean,active: Boolean,resetToken: Int,onTap: () -> Unit,onZoomed: (Boolean) -> Unit) {
-    var scale by remember(page) {mutableFloatStateOf(1f)}
-    var offset by remember(page) {mutableStateOf(Offset.Zero)}
+internal fun ReaderCanvas(page: PageFile,mediaPath: (String) -> File,modifier: Modifier,pageNumber: Int,continuous: Boolean,active: Boolean,resetToken: Int,onTap: () -> Unit,onZoomed: (Boolean) -> Unit) {
+    var scale by remember(page.source,page.pdfPage) {mutableFloatStateOf(1f)}
+    var offset by remember(page.source,page.pdfPage) {mutableStateOf(Offset.Zero)}
     var bounds by remember {mutableStateOf(IntSize.Zero)}
     val source=mediaPath(page.source)
     val maxSize=if(scale>1.01f) 3000 else 1800
@@ -425,7 +428,7 @@ private fun ReaderCanvas(page: PageFile,mediaPath: (String) -> File,modifier: Mo
     val aspect=bitmap?.let {it.width.toFloat()/it.height} ?: previewAspect
     Box(modifier.then(if(continuous) Modifier.aspectRatio(aspect) else Modifier).clipToBounds().onSizeChanged {bounds=it}
         .transformable(transform,canPan={scale>1.01f})
-        .pointerInput(page) {detectTapGestures(onTap={currentTap()},onDoubleTap={point ->
+        .pointerInput(page.source,page.pdfPage) {detectTapGestures(onTap={currentTap()},onDoubleTap={point ->
             scale=if(scale>1.01f) 1f else 2.5f
             offset=if(scale==1f) Offset.Zero else Offset((bounds.width/2-point.x)*(scale-1),(bounds.height/2-point.y)*(scale-1))
         })},contentAlignment=Alignment.Center) {

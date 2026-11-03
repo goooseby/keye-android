@@ -43,6 +43,7 @@ fun ExportSheet(materials: List<StudyMaterial>,shareOnly: Boolean=false,onDismis
     val count=materials.sumOf { it.pages.size }
     val keptCount=materials.sumOf {it.keptCount}
     var name by rememberSaveable { mutableStateOf(single?.let { if(it.title.contains(it.day)) it.title else "${it.title}_${it.day}" } ?: "课程课件_${java.time.LocalDate.now()}") }
+    var includeNotes by rememberSaveable {mutableStateOf(true)}
     var range by rememberSaveable { mutableIntStateOf(0) }
     var text by rememberSaveable { mutableStateOf("") }
     var location by remember { mutableStateOf(storage.location) }
@@ -57,7 +58,7 @@ fun ExportSheet(materials: List<StudyMaterial>,shareOnly: Boolean=false,onDismis
     val valid=name.isNotBlank() && selectedCount>0 && (range!=2 || parsed.isSuccess)
     fun submit(action: ExportAction) {
         if(action!=ExportAction.Share && Build.VERSION.SDK_INT<29 && storage.folder==null) {picker.launch(null);return}
-        onSubmit(ExportRequest(materials.map {it.id},name,selected,action))
+        onSubmit(ExportRequest(materials.map {it.id},name,selected,action,includeNotes=includeNotes,snapshots=materials))
     }
     ModalBottomSheet(onDismissRequest=onDismiss,sheetState=rememberModalBottomSheetState(skipPartiallyExpanded=true)) {
         Column(Modifier.imePadding().verticalScroll(rememberScrollState()).padding(start=20.dp,end=20.dp,bottom=24.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
@@ -70,6 +71,10 @@ fun ExportSheet(materials: List<StudyMaterial>,shareOnly: Boolean=false,onDismis
                 FilterChip(range==2,{range=2},label={Text("指定页")})
             }
             if(range==2) OutlinedTextField(text,{text=it},modifier=Modifier.fillMaxWidth(),label={Text("页码范围")},placeholder={Text("1,3-5,8")},supportingText={Text(if(text.isBlank()) "按原始页码选择，自动跳过已移除页面" else parsed.exceptionOrNull()?.message ?: if(selectedCount==0) "所选范围中没有可导出页面" else "已选 $selectedCount 页")},isError=text.isNotBlank()&&(parsed.isFailure||selectedCount==0),singleLine=true,keyboardOptions=KeyboardOptions(keyboardType=KeyboardType.Ascii),shape=RoundedCornerShape(14.dp))
+            if(materials.any {it.pageNotes.isNotEmpty()}) Row(verticalAlignment=Alignment.CenterVertically) {
+                Text("包含页批注",Modifier.weight(1f),style=MaterialTheme.typography.bodyMedium)
+                Switch(includeNotes,{includeNotes=it})
+            }
             if(!shareOnly) {
                 Surface(shape=RoundedCornerShape(14.dp),color=MaterialTheme.colorScheme.surfaceVariant) {
                     Row(Modifier.fillMaxWidth().padding(start=14.dp,end=4.dp),verticalAlignment=Alignment.CenterVertically) {
@@ -80,7 +85,7 @@ fun ExportSheet(materials: List<StudyMaterial>,shareOnly: Boolean=false,onDismis
                 }
                 locationError?.let { Text(it,color=MaterialTheme.colorScheme.error,style=MaterialTheme.typography.bodySmall) }
             }
-            Text(if(single?.kind=="pdf"&&range==0&&single.excluded.isEmpty()) "保留原始 PDF 的文字与清晰度" else "生成图片型 PDF，所选页面不影响原课件",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(if(single?.kind=="pdf"&&range==0&&single.excluded.isEmpty()&&(!includeNotes||single.pageNotes.isEmpty())) "保留原始 PDF 的文字与清晰度" else "生成图片型 PDF，所选页面不影响原课件",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
             Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(10.dp)) {
                 if(!shareOnly) OutlinedButton(onClick={submit(ExportAction.Save)},enabled=valid,modifier=Modifier.weight(1f).heightIn(min=50.dp),shape=RoundedCornerShape(14.dp)) {Text("导出")}
                 Button(onClick={submit(if(shareOnly) ExportAction.Share else ExportAction.SaveAndShare)},enabled=valid,modifier=Modifier.weight(1f).heightIn(min=50.dp),shape=RoundedCornerShape(14.dp)) {Text(if(shareOnly) "分享 PDF" else "导出并分享")}

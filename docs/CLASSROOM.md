@@ -1,0 +1,37 @@
+# 课堂跟看检查
+
+## 入口与边界
+
+获取页查询课次后，点右侧“跟看”。今天快捷查询只是缩小日期范围，不将历史／当天课程虚构为正在直播。学校接口能提供哪些页面，就显示并保存哪些页面；功能不包含音视频，也不能获知老师何时结束上课。
+
+必须使用有权查看该课次的账号。没有页面时等待；缓存可离线阅读和编辑批注。进程退出后不常驻轮询，重新从课次或课件更多菜单进入即可继续获取。
+
+## 确定性演示
+
+Debug 独有的 ClassroomDemoActivity 使用本地产生的 PNG，通过与正式功能相同的跟看、存储、阅读和导出代码处理。它不读取登录 Cookie，不请求学校接口；生成的课程明确命名“课堂跟看演示”，独立 sourceKey，不替换用户课件。Release 不包含此 Activity 或演示源。
+
+```powershell
+adb -s emulator-5554 shell am start -n io.github.goooseby.keye/.ClassroomDemoActivity --ei pages 2
+# 同一演示会话增加页面
+adb -s emulator-5554 shell am start -n io.github.goooseby.keye/.ClassroomDemoActivity --ei pages 4
+# 暂时断网，再恢复
+adb -s emulator-5554 shell am start -n io.github.goooseby.keye/.ClassroomDemoActivity --ez offline true
+adb -s emulator-5554 shell am start -n io.github.goooseby.keye/.ClassroomDemoActivity --ez offline false
+```
+
+演示请求轨迹保存在应用私有 `files/qa/classroom-trace.json`，仅记录演示课次的次数、时间和最大并发，不记录真实账号或接口凭据。自动化只读取指定模拟器，不能把真机当作默认测试设备。
+
+## 场景
+
+1. 空页面开始跟看，后续新增两页：等待状态消失，定位到最新已保存页。
+2. 两页增到四页：新增内容追加、标识去重，已有文件不重下；最大并发为一。
+3. 手动翻到第一页，再增到五页：仍停在第一页，按钮提示新内容；点回到最新后定位末页。
+4. 放大、缩略图定位、输入批注都暂停跟随；新页到来不改变当前页；旋转／全屏开合保留回看状态。
+5. 修改或删除批注，确认保存后重启仍存在；放弃未保存编辑需确认，不改原件。
+6. 保存 PNG 的页码与选中页一致，批注显示为页尾；PDF 可含／不含批注，导出打开时的新页不追加到本次快照。
+7. 断网时保留已有页面；失败逐次退避，不无限高频请求；恢复网络后只补缺页。
+8. 离开到后台超过多个轮询间隔，不继续产生请求；回到前台恢复。
+9. 暂停同步、继续、结束保留、重新进入、切换课次、登录失效与重新登录。
+10. 已有移除页不重新出现；旧课件首次跟看按文件内容补充标识，批注和阅读页码不移位。
+
+本地演示用于验证随时间增页等可控场景；真实学校课次另行验证接口格式、登录与实际图片，不能用演示结果宣称真实课堂已验证。

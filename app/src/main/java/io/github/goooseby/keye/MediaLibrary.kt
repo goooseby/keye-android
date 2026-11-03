@@ -182,15 +182,33 @@ class MediaLibrary(private val context: Context) {
         return PageFile(relative(source), relative(preview))
     }
 
+    fun classroomImage(materialId: String,key: String,bytes: ByteArray): PageFile {
+        require(Regex("[a-f0-9]{64}").matches(key))
+        val dir=folder(materialId)
+        val prefix="follow-${key}-${newId().take(8)}"
+        val source=File(dir,"$prefix-original")
+        val preview=File(dir,"$prefix-preview.jpg")
+        try {
+            source.writeBytes(bytes)
+            val bitmap=decode(source,2400)
+            try {writePreview(bitmap,preview)} finally {bitmap.recycle()}
+            return PageFile(relative(source),relative(preview),remoteKey=key)
+        } catch(error: Exception) {source.delete();preview.delete();throw error}
+    }
+    fun discardClassroomPage(page: PageFile) {
+        file(page.source).takeIf {it.name.startsWith("follow-")}?.delete()
+        file(page.preview).takeIf {it.name.startsWith("follow-")}?.delete()
+    }
+
     fun removeIncomplete(id: String) {
         File(root, id).deleteRecursively()
     }
 
     /** Unfiltered single PDFs are copied; other exports rasterize selected pages. */
-    fun export(materials: List<StudyMaterial>, output: OutputStream, selectedPages: Map<String, Set<Int>>? = null, progress: (Int, Int) -> Unit) {
+    fun export(materials: List<StudyMaterial>, output: OutputStream, selectedPages: Map<String, Set<Int>>? = null, includeNotes: Boolean=true, progress: (Int, Int) -> Unit) {
         // A direct PDF export keeps text, links, and vector pages intact.
         val single = materials.singleOrNull()
-        if (single?.kind == "pdf" && (selectedPages?.get(single.id) ?: ((1..single.pages.size).toSet()-single.excluded)) == (1..single.pages.size).toSet()) {
+        if (single?.kind == "pdf" && (!includeNotes || single.pageNotes.isEmpty()) && (selectedPages?.get(single.id) ?: ((1..single.pages.size).toSet()-single.excluded)) == (1..single.pages.size).toSet()) {
             val original = single.pages.firstOrNull()?.source ?: error("PDF 中没有页面")
             file(original).inputStream().use { it.copyTo(output) }
             progress(single.pages.size, single.pages.size)
@@ -199,15 +217,15 @@ class MediaLibrary(private val context: Context) {
         val selected = materials.flatMap { material ->
             val included=selectedPages?.get(material.id) ?: ((1..material.pages.size).toSet()-material.excluded)
             material.pages.mapIndexedNotNull { index, page ->
-                if(index+1 !in included) null else page
+                if(index+1 !in included) null else page to if(includeNotes) material.pageNotes[index+1].orEmpty() else ""
             }
         }
         require(selected.isNotEmpty()) { "请选择至少一页" }
         val document = PdfDocument()
         val renderers = mutableMapOf<String, Pair<ParcelFileDescriptor, PdfRenderer>>()
         try {
-            selected.forEachIndexed { index, page ->
-                val bitmap = if (page.pdfPage != null) {
+            selected.forEachIndexed { index, (page,note) ->
+                val original = if (page.pdfPage != null) {
                     val renderer = renderers.getOrPut(page.source) {
                         val descriptor = ParcelFileDescriptor.open(file(page.source), ParcelFileDescriptor.MODE_READ_ONLY)
                         try {
@@ -219,6 +237,7 @@ class MediaLibrary(private val context: Context) {
                     }.second
                     renderPdfPage(renderer, page.pdfPage, 2400)
                 } else decode(file(page.source), 2400)
+                val bitmap=withPageNote(original,note)
                 try {
                     val width = 1240
                     val height = (width.toFloat() * bitmap.height / bitmap.width).toInt().coerceAtLeast(1)

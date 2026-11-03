@@ -2,12 +2,13 @@
 
 原生 Android 课程课件阅读应用，使用 Kotlin 和 Jetpack Compose。围绕获取课件、离线阅读、继续阅读和导出分享设计，最低支持 Android 8.0（API 26）。
 
-当前公开版本为 **0.1.0**，项目持续开发中。[下载安装包](https://github.com/goooseby/keye-android/releases/latest/download/keye-android.apk) · [发布记录](https://github.com/goooseby/keye-android/releases)。课程内容以 PDF 或图片阅读，不直接解析 PPT／PPTX 文件，也不支持幻灯片动画。
+当前公开版本为 **0.2.0**。[下载安装包](https://github.com/goooseby/keye-android/releases/latest/download/keye-android.apk) · [发布记录](https://github.com/goooseby/keye-android/releases)。课程内容以 PDF 或图片阅读，不直接解析 PPT／PPTX 文件，也不支持幻灯片动画。
 
 ## 功能
 
 - **课程与续读**：最近阅读、全部课程、课件搜索和本地导入，保存原始页码及页内阅读位置。
 - **阅读**：默认竖屏连续滚动，可切换横向逐页；双击及双指缩放，提供页面总览、跳页和页书签。
+- **课堂跟看**：从课次进入，约三秒检查新增页，默认跟随最新；手动回看不跳页，支持按页文字批注、保存当页及已有页面快照导出。后台暂停，页面自动保留到课程。
 - **全屏观看**：自动横屏，悬浮翻页按钮、进度滑杆、书签和缩放复位；控件闲置自动隐藏，退出恢复常规阅读方式。
 - **阅读工具**：首页／末页、下一书签、阅读背景、保持亮屏及阅读器独立亮度。
 - **页面管理**：单页／批量移除、撤销及恢复；原件保留，阅读与默认导出跳过已移除页。

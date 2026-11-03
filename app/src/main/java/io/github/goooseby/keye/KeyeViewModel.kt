@@ -8,9 +8,11 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Semaphore
@@ -26,6 +28,7 @@ import kotlin.coroutines.coroutineContext
 
 data class UiState(
     val exportState: ExportState? = null,
+    val classroom: ClassroomSession? = null,
     val loading: Boolean = true,
     val loadError: String? = null,
     val courses: List<Course> = emptyList(),
@@ -41,7 +44,7 @@ data class UiState(
     val endDate: String = LocalDate.now().toString()
 )
 
-class KeyeViewModel(application: Application) : AndroidViewModel(application) {
+class KeyeViewModel @JvmOverloads constructor(application: Application,private val classroomSourceFactory: (() -> ClassroomPageSource?)?=null) : AndroidViewModel(application) {
     private val store = LibraryStore.getInstance(application)
     private val media = MediaLibrary(application)
     private val school = SchoolApi()
@@ -57,6 +60,11 @@ class KeyeViewModel(application: Application) : AndroidViewModel(application) {
     private val importSlots = Semaphore(1)
     private val queuedSources = ConcurrentHashMap.newKeySet<String>()
     private val materialMutex = Mutex()
+    private val classroomRunLock=Mutex()
+    private var classroomJob: Job?=null
+    private val classroomGeneration=java.util.concurrent.atomic.AtomicLong()
+    @Volatile private var classroomForeground=false
+    private val classroomWake=kotlinx.coroutines.channels.Channel<Unit>(kotlinx.coroutines.channels.Channel.CONFLATED)
     private val mutableState = MutableStateFlow(UiState())
     val state = mutableState.asStateFlow()
 
@@ -191,6 +199,7 @@ class KeyeViewModel(application: Application) : AndroidViewModel(application) {
         sessionSequence.incrementAndGet();sessionJob?.cancel()
         scanSequence.incrementAndGet();scanJob?.cancel()
         state.value.tasks.filter {it.type=="download"}.forEach {jobs[it.id]?.cancel()}
+        endClassroom()
         auth=null;rejectedCookie=null
         mutableState.update {it.copy(loggedIn=false,schoolConnection=SchoolConnection.SignedOut,busy=false,schedule=emptyList(),notice="已退出学校登录")}
     }
@@ -223,6 +232,159 @@ class KeyeViewModel(application: Application) : AndroidViewModel(application) {
             } finally {
                 if (sequence == scanSequence.get()) mutableState.update { it.copy(busy = false) }
             }
+        }
+    }
+
+    fun setClassroomForeground(value: Boolean) {
+        classroomForeground=value
+        if(value) classroomWake.trySend(Unit)
+        else mutableState.update {state ->state.copy(classroom=state.classroom?.let {
+            if(it.stage in setOf(ClassroomStage.Ended,ClassroomStage.NeedsLogin)) it
+            else it.copy(stage=ClassroomStage.Paused,fetching=false,message="已暂停同步，页面已保存")
+        })}
+    }
+    @Volatile private var classroomManuallyPaused=false
+    fun pauseClassroom() {
+        classroomManuallyPaused=true
+        mutableState.update {it.copy(classroom=it.classroom?.copy(stage=ClassroomStage.Paused,message="已暂停同步",fetching=false))}
+        classroomWake.trySend(Unit)
+    }
+    fun resumeClassroom() {
+        classroomManuallyPaused=false
+        val session=state.value.classroom ?: return
+        if(classroomJob?.isActive!=true) startClassroom(session.entry)
+        else classroomWake.trySend(Unit)
+    }
+    fun refreshClassroom() {if(state.value.classroom?.fetching!=true) classroomWake.trySend(Unit)}
+    fun classroomInterval(seconds: Int) {
+        if(seconds !in setOf(3,5,10)) return
+        getApplication<Application>().getSharedPreferences("classroom",0).edit().putInt("interval",seconds).apply()
+        mutableState.update {it.copy(classroom=it.classroom?.copy(intervalSeconds=seconds))}
+        classroomWake.trySend(Unit)
+    }
+    fun endClassroom() {
+        classroomGeneration.incrementAndGet();classroomJob?.cancel()
+        mutableState.update {it.copy(classroom=it.classroom?.copy(stage=ClassroomStage.Ended,fetching=false,message="跟看已结束，课件已保留"))}
+    }
+    fun startClassroom(entry: ScheduleEntry) {
+        val previous=state.value.classroom
+        if(previous?.entry?.id==entry.id && classroomJob?.isActive==true) {resumeClassroom();return}
+        if(entry.id in queuedSources) {notice("此课次正在下载，请完成或取消下载后再跟看");return}
+        val interval=getApplication<Application>().getSharedPreferences("classroom",0).getInt("interval",3).takeIf {it in setOf(3,5,10)} ?: 3
+        val credentials=auth
+        val source=classroomSourceFactory?.invoke() ?: credentials?.let {captured ->object: ClassroomPageSource {
+            override val credentials=captured
+            override fun owns(entry: ScheduleEntry)=SchoolApi.ownsEntry(captured,entry)
+            private fun checkAccount() {if(auth?.jwt!=captured.jwt || auth?.userId!=captured.userId) throw SchoolSessionExpired()}
+            override fun pages(entry: ScheduleEntry): List<ClassroomPage> {checkAccount();return school.imagePages(captured,entry,state.value.settings.timeoutSeconds.coerceAtMost(12))}
+            override fun image(page: ClassroomPage): ByteArray {checkAccount();return school.image(captured,page.url,state.value.settings.timeoutSeconds.coerceAtMost(12))}
+        }}
+        val generation=classroomGeneration.incrementAndGet()
+        classroomJob?.cancel();classroomManuallyPaused=false
+        mutableState.update {it.copy(classroom=ClassroomSession(entry,previous?.takeIf {it.entry.id==entry.id}?.materialId ?: state.value.materials.firstOrNull {it.sourceKey==entry.id && !it.deleted}?.id,
+            stage=if(source==null) ClassroomStage.NeedsLogin else ClassroomStage.Connecting,intervalSeconds=interval,
+            message=if(source==null) "请登录学校平台后继续，已有页面仍可阅读" else "正在连接课堂"))}
+        if(source==null) return
+        if(!source.owns(entry)) {
+            mutableState.update {it.copy(classroom=it.classroom?.copy(stage=ClassroomStage.NeedsLogin,message="请使用查询此课次的学校账号登录"))};return
+        }
+        classroomJob=viewModelScope.launch(Dispatchers.IO) {
+            // A cancelled HTTP call can finish late. This lock keeps replacement
+            // sessions serial too; generation guards reject late writes.
+            classroomRunLock.withLock {
+                fun publish(transform: (ClassroomSession) -> ClassroomSession) {
+                    mutableState.update {state ->if(classroomGeneration.get()==generation) state.copy(classroom=state.classroom?.let(transform)) else state}
+                }
+                try {
+                    state.first {!it.loading}
+                    coroutineContext.ensureActive()
+                    val initial=materialMutex.withLock {
+                        val existing=store.materialBySource(entry.id)
+                        check(existing?.deleted!=true) {"该课件在回收站中，请先恢复后跟看"}
+                        check(existing==null || existing.kind=="images") {"此课件类型不支持课堂跟看"}
+                        val material=(existing ?: StudyMaterial(sourceKey=entry.id,title=entry.title,day=entry.day,courseId=entry.groupId,kind="images",pages=emptyList())).copy(schoolEntry=entry)
+                        if(store.courses().none {it.id==entry.groupId}) store.put(Course(id=entry.groupId,title=entry.title))
+                        store.put(material);refreshLibrary();material
+                    }
+                    publish {it.copy(materialId=initial.id)}
+                    // Old downloads have no remote keys. Match their original
+                    // bytes once instead of guessing URL identity from position.
+                    val legacyHashes=initial.pages.mapIndexedNotNull {index,page ->if(page.remoteKey!=null) null else runCatching {
+                        val digest=java.security.MessageDigest.getInstance("SHA-256")
+                        media.file(page.source).inputStream().use {input ->val buffer=ByteArray(65536);while(true) {val n=input.read(buffer);if(n<0) break;digest.update(buffer,0,n)}}
+                        index to digest.digest().toList()
+                    }.getOrNull()}.toMap()
+                    var failures=0
+                    while(kotlinx.coroutines.currentCoroutineContext().isActive && classroomGeneration.get()==generation) {
+                        if(!classroomForeground || classroomManuallyPaused) {
+                            publish {it.copy(stage=ClassroomStage.Paused,fetching=false,message=if(classroomManuallyPaused) "已暂停同步" else "已暂停同步，页面已保存")}
+                            classroomWake.receive();continue
+                        }
+                        while(classroomWake.tryReceive().isSuccess) { /* conflate pending controls */ }
+                        var waitMillis=(state.value.classroom?.intervalSeconds ?: 3)*1000L
+                        try {
+                            publish {it.copy(stage=if(it.checkedAt==0L) ClassroomStage.Connecting else ClassroomStage.Connected,fetching=true,message=if(it.checkedAt==0L) "正在查找课件页面" else it.message)}
+                            val before=store.material(initial.id)
+                            if(before==null || before.deleted) {publish {it.copy(stage=ClassroomStage.Ended,fetching=false,message="课件已移入回收站，请恢复后重新跟看")};break}
+                            val catalog=source.pages(entry)
+                            coroutineContext.ensureActive()
+                            if(classroomGeneration.get()!=generation) break
+                            val current=store.material(initial.id) ?: error("课件不存在")
+                            check(!current.deleted) {"课件已移入回收站，请恢复后重新跟看"}
+                            val pending=pendingClassroomPages(current.pages.mapNotNull {it.remoteKey}.toSet(),catalog)
+                            publish {it.copy(remoteCount=catalog.size)}
+                            for((position,remote) in pending.withIndex()) {
+                                coroutineContext.ensureActive()
+                                if(!classroomForeground || classroomManuallyPaused) break
+                                publish {it.copy(message="正在保存新页面 ${position+1} / ${pending.size}")}
+                                val bytes=source.image(remote)
+                                coroutineContext.ensureActive()
+                                if(classroomGeneration.get()!=generation) break
+                                val hash=java.security.MessageDigest.getInstance("SHA-256").digest(bytes).toList()
+                                var created:PageFile?=null
+                                var committed=false
+                                try {
+                                    materialMutex.withLock {
+                                        coroutineContext.ensureActive()
+                                        check(classroomGeneration.get()==generation)
+                                        val latest=store.material(initial.id) ?: error("课件不存在")
+                                        check(!latest.deleted) {"课件已移入回收站"}
+                                        if(latest.pages.any {it.remoteKey==remote.key}) return@withLock
+                                        val legacy=legacyHashes.entries.firstOrNull {(index,oldHash) ->oldHash==hash && latest.pages.getOrNull(index)?.remoteKey==null}?.key
+                                        val pages=if(legacy!=null) latest.pages.mapIndexed {index,page ->if(index==legacy) page.copy(remoteKey=remote.key) else page}
+                                            else {created=media.classroomImage(latest.id,remote.key,bytes);latest.pages+created!!}
+                                        coroutineContext.ensureActive()
+                                        val changed=latest.copy(pages=pages,revision=latest.revision+if(legacy==null) 1 else 0,touched=if(legacy==null) System.currentTimeMillis() else latest.touched)
+                                        store.put(changed);committed=true
+                                        mutableState.update {state ->state.copy(materials=state.materials.filterNot {it.id==changed.id}+changed)}
+                                    }
+                                } finally {if(!committed) created?.let(media::discardClassroomPage)}
+                            }
+                            failures=0
+                            publish {it.copy(stage=if(!classroomForeground||classroomManuallyPaused) ClassroomStage.Paused else if(catalog.isEmpty()) ClassroomStage.Waiting else ClassroomStage.Connected,
+                                fetching=false,checkedAt=System.currentTimeMillis(),retrySeconds=0,
+                                message=if(!classroomForeground||classroomManuallyPaused) "已暂停同步，页面已保存" else if(catalog.isEmpty()) "等待老师上传课件" else "已同步 · 每 ${it.intervalSeconds} 秒检查")}
+                        } catch(error: CancellationException) {throw error}
+                        catch(error: SchoolSessionExpired) {
+                            source.credentials?.let {expireSchoolSession(it)}
+                            publish {it.copy(stage=ClassroomStage.NeedsLogin,fetching=false,message="学校登录已失效，登录后可继续；已有页面已保存")};break
+                        } catch(error: Exception) {
+                            failures++
+                            waitMillis=maxOf(classroomRetryMillis(failures,state.value.classroom?.intervalSeconds ?: 3),if(error is SchoolRateLimited) error.retryAfterSeconds*1000L else 0L)
+                            publish {it.copy(stage=ClassroomStage.Retrying,fetching=false,retrySeconds=(waitMillis/1000).toInt(),message=error.message ?: "暂时无法同步，已保留页面")}
+                        }
+                        kotlinx.coroutines.withTimeoutOrNull(waitMillis) {classroomWake.receive()}
+                    }
+                } catch(error: CancellationException) {throw error}
+                catch(error: Exception) {publish {it.copy(stage=ClassroomStage.Ended,fetching=false,message=error.message ?: "无法开始跟看")}}
+            }
+        }
+    }
+    suspend fun savePageNote(id: String,page: Int,text: String) = withContext(Dispatchers.IO) {
+        editMaterial(id) {current ->
+            require(page in 1..current.pages.size) {"页码无效"}
+            val notes=if(text.isBlank()) current.pageNotes-page else current.pageNotes+(page to text.trim().take(2000))
+            current.copy(pageNotes=notes,revision=current.revision+if(notes==current.pageNotes) 0 else 1)
         }
     }
 
@@ -349,7 +511,8 @@ class KeyeViewModel(application: Application) : AndroidViewModel(application) {
     fun download(entries: List<ScheduleEntry>) {
         val credentials=auth ?: run {notice("请先登录学校平台");return}
         val accepted=entries.distinctBy(ScheduleEntry::id).filter {entry ->
-            if(!SchoolApi.ownsEntry(credentials,entry)) {notice("请使用查询这些课次的学校账号登录");false}
+            if(state.value.classroom?.let {it.entry.id==entry.id && it.stage!=ClassroomStage.Ended}==true) {notice("该课次正在跟看，无需重复下载");false}
+            else if(!SchoolApi.ownsEntry(credentials,entry)) {notice("请使用查询这些课次的学校账号登录");false}
             else queuedSources.add(entry.id)
         }
         if(accepted.isEmpty()) return
@@ -384,7 +547,7 @@ class KeyeViewModel(application: Application) : AndroidViewModel(application) {
 
     private suspend fun downloadTask(task: TaskRecord, entry: ScheduleEntry, credentials: SchoolAuth) {
         val existing = store.materialBySource(entry.id)
-        if (existing != null) {
+        if (existing != null && (existing.pages.isNotEmpty() || existing.deleted)) {
             putTask(task.copy(status = "done", progress = 100,
                 message = if (existing.deleted) "课件位于回收站" else "资料库中已有此课件",
                 materialId = existing.id))
@@ -405,7 +568,7 @@ class KeyeViewModel(application: Application) : AndroidViewModel(application) {
                     try {
                         pageFile = media.downloadedImage(
                             task.id, index, school.image(credentials, url, settings.timeoutSeconds)
-                        )
+                        ).copy(remoteKey=classroomPageKey(url))
                         coroutineContext.ensureActive()
                         break
                     } catch (error: CancellationException) {
@@ -422,9 +585,9 @@ class KeyeViewModel(application: Application) : AndroidViewModel(application) {
                     message = "已下载 ${index + 1} / ${urls.size} 页"))
                 if (settings.requestGapMillis > 0) kotlinx.coroutines.delay(settings.requestGapMillis)
             }
-            val material = StudyMaterial(
+            val material = existing?.copy(pages=pages,schoolEntry=entry,revision=existing.revision+1) ?: StudyMaterial(
                 id = task.id, sourceKey = entry.id, title = entry.title,
-                day = entry.day, courseId = entry.groupId, kind = "images", pages = pages
+                day = entry.day, courseId = entry.groupId, kind = "images", pages = pages,schoolEntry=entry
             )
             store.put(material)
             savedMaterial = material
@@ -562,7 +725,7 @@ class KeyeViewModel(application: Application) : AndroidViewModel(application) {
                 val source=material.pages.getOrNull(page-1) ?: error("页码无效")
                 val directory=File(getApplication<Application>().cacheDir,"shared/${newId()}").apply {mkdirs()}
                 imageFile=File(directory,"${material.title.replace(Regex("""[\/:*?"<>|]"""),"_").take(80)}_第${page}页.png")
-                val bitmap=renderReadingPage(media.file(source.source),source.pdfPage,2400) ?: error("无法读取页面")
+                val bitmap=withPageNote(renderReadingPage(media.file(source.source),source.pdfPage,2400) ?: error("无法读取页面"),material.pageNotes[page].orEmpty())
                 try {imageFile.outputStream().use {bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG,100,it)}} finally {bitmap.recycle()}
                 coroutineContext.ensureActive()
                 val app=getApplication<Application>()
@@ -570,6 +733,37 @@ class KeyeViewModel(application: Application) : AndroidViewModel(application) {
                 mutableState.update {it.copy(exportState=ExportState(result=result,message="当前页已准备好",autoShare=true,origin=id))}
             } catch(error: CancellationException) {imageFile?.delete();mutableState.update {it.copy(exportState=null)};throw error}
             catch(error: Exception) {imageFile?.delete();mutableState.update {it.copy(exportState=ExportState(failed=true,message=error.message?:"无法分享当前页"))}}
+        }
+    }
+    fun savePageImage(id: String,page: Int,chosenUri: Uri?=null) {
+        if(exportJob?.isActive==true) {notice("正在准备文件，请稍候");return}
+        mutableState.update {it.copy(exportState=ExportState(running=true,message="正在保存当前页"))}
+        exportJob=viewModelScope.launch(Dispatchers.IO) {
+            val app=getApplication<Application>()
+            var created:Uri?=null
+            try {
+                val material=store.material(id) ?: error("课件不存在")
+                val source=material.pages.getOrNull(page-1) ?: error("页码无效")
+                val bitmap=withPageNote(renderReadingPage(media.file(source.source),source.pdfPage,2400) ?: error("无法读取页面"),material.pageNotes[page].orEmpty())
+                val name=material.title.replace(Regex("""[\/:*?"<>|]"""),"_").take(70)+"_第${page}页.png"
+                try {
+                    if(android.os.Build.VERSION.SDK_INT>=29 && chosenUri==null) {
+                        val values=android.content.ContentValues().apply {
+                            put(android.provider.MediaStore.Images.Media.DISPLAY_NAME,name)
+                            put(android.provider.MediaStore.Images.Media.MIME_TYPE,"image/png")
+                            put(android.provider.MediaStore.Images.Media.RELATIVE_PATH,"Pictures/Keye")
+                            put(android.provider.MediaStore.Images.Media.IS_PENDING,1)
+                        }
+                        created=app.contentResolver.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI,values) ?: error("无法创建图片文件")
+                    }
+                    val uri=chosenUri ?: created ?: error("请选择保存位置")
+                    app.contentResolver.openOutputStream(uri)?.use {output ->check(bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG,100,output))} ?: error("保存位置不可写")
+                    coroutineContext.ensureActive()
+                    if(android.os.Build.VERSION.SDK_INT>=29 && created!=null) app.contentResolver.update(uri,android.content.ContentValues().apply {put(android.provider.MediaStore.Images.Media.IS_PENDING,0)},null,null)
+                    mutableState.update {it.copy(exportState=ExportState(result=ExportResult(uri,name,if(created!=null) "图片 / Keye" else "所选位置",ExportAction.Save,"image/png"),message="当前页已保存",origin=id))}
+                } finally {bitmap.recycle()}
+            } catch(error: CancellationException) {created?.let {app.contentResolver.delete(it,null,null)};mutableState.update {it.copy(exportState=null)};throw error}
+            catch(error: Exception) {created?.let {app.contentResolver.delete(it,null,null)};mutableState.update {it.copy(exportState=ExportState(failed=true,message=error.message ?: "无法保存当前页"))}}
         }
     }
     fun consumeShare() {mutableState.update { it.copy(exportState=it.exportState?.copy(autoShare=false)) }}
@@ -582,11 +776,11 @@ class KeyeViewModel(application: Application) : AndroidViewModel(application) {
         exportJob=viewModelScope.launch(Dispatchers.IO) {
             var staged: File?=null
             try {
-                val materials=request.ids.map { store.material(it) ?: error("课件不存在") }
+                val materials=request.snapshots ?: request.ids.map { store.material(it) ?: error("课件不存在") }
                 require(materials.none { it.deleted } && materials.isNotEmpty()) { "课件已移至回收站" }
                 staged=File.createTempFile("shared-", ".pdf", File(getApplication<Application>().cacheDir,"shared").apply { mkdirs() })
                 val exportContext=coroutineContext
-                staged.outputStream().use { out -> media.export(materials,out,request.pages) { current,total ->
+                staged.outputStream().use { out -> media.export(materials,out,request.pages,request.includeNotes) { current,total ->
                     exportContext.ensureActive()
                     mutableState.update { it.copy(exportState=ExportState(running=true,progress=current.toFloat()/total,message="正在生成 $current / $total 页")) }
                 } }

@@ -69,6 +69,8 @@ private fun KeyeApp(model: KeyeViewModel,mediaPath: (String) -> File,updates: Ap
     var libraryTrash by rememberSaveable{mutableStateOf(false)}
     var pendingImportCourseId by rememberSaveable{mutableStateOf<String?>(null)}
     var chooseImportCourse by remember{mutableStateOf(false)}
+    var classroomOpen by rememberSaveable {mutableStateOf(false)}
+    var pendingClassroom by remember {mutableStateOf<ScheduleEntry?>(null)}
     var loginOpen by rememberSaveable{mutableStateOf(false)}
     val snackbar=remember{SnackbarHostState()}
     val importLauncher=rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) {uris ->
@@ -87,6 +89,11 @@ private fun KeyeApp(model: KeyeViewModel,mediaPath: (String) -> File,updates: Ap
         importLauncher.launch(arrayOf("image/*","application/pdf"))
     }
     fun requestLogin() {loginOpen=true}
+    fun openClassroom(entry: ScheduleEntry) {
+        val active=state.classroom
+        if(active!=null && active.entry.id!=entry.id && active.stage!=ClassroomStage.Ended) pendingClassroom=entry
+        else {model.startClassroom(entry);classroomOpen=true}
+    }
     fun goBack() {if(materialId!=null) materialId=null else if(courseId!=null) courseId=null else section=if(section==Section.Tasks) tasksOrigin else Section.Library}
     val lifecycleOwner=LocalLifecycleOwner.current
     LaunchedEffect(lifecycleOwner,loginOpen) {
@@ -103,19 +110,29 @@ private fun KeyeApp(model: KeyeViewModel,mediaPath: (String) -> File,updates: Ap
             model.checkSchoolSession(CookieManager.getInstance().getCookie(SchoolApi.HOME))
     }
     LaunchedEffect(state.notice) {state.notice?.let{snackbar.showSnackbar(it);if(model.state.value.notice==it) model.notice(null)}}
-    AppUpdateHost(updates,canPrompt=materialId==null && !loginOpen && exportIds.isEmpty() && !state.loading)
+    AppUpdateHost(updates,canPrompt=!classroomOpen && materialId==null && !loginOpen && exportIds.isEmpty() && !state.loading)
     if(exportIds.isNotEmpty()) {
         val materials=exportIds.mapNotNull { id ->state.materials.firstOrNull { it.id==id } }
         if(materials.isNotEmpty()) ExportSheet(materials,shareOnly,onDismiss={exportIds=emptyList()},onSubmit={model.export(it.copy(origin=materialId?:section.name));exportIds=emptyList()})
+    }
+    if(pendingClassroom!=null) AlertDialog(onDismissRequest={pendingClassroom=null},title={Text("切换课堂跟看？")},text={Text("当前已获取的页面和批注会保留。")},confirmButton={TextButton(onClick={pendingClassroom?.let {model.startClassroom(it)};pendingClassroom=null;classroomOpen=true}) {Text("切换并保留")}},dismissButton={TextButton(onClick={pendingClassroom=null}) {Text("取消")}})
+    LaunchedEffect(classroomOpen,loginOpen,state.loggedIn,state.classroom?.stage) {
+        if(classroomOpen && !loginOpen && state.loggedIn && state.classroom?.stage==ClassroomStage.NeedsLogin) model.resumeClassroom()
+    }
+    if(classroomOpen && state.classroom==null) LaunchedEffect(Unit) {classroomOpen=false}
+    if(loginOpen) {SchoolLoginScreen(model,{loginOpen=false});return}
+    if(classroomOpen && !loginOpen) state.classroom?.let {session ->
+        key(session.entry.id) {ClassroomScreen(session,state.materials.firstOrNull {it.id==session.materialId},state,model,mediaPath,
+            onBack={classroomOpen=false},onLogin={requestLogin()})}
+        return
     }
     val readingMaterial=state.materials.firstOrNull {it.id==materialId && !it.deleted}
     if(readingMaterial!=null) {
         ReaderScreen(readingMaterial,model,mediaPath,onBack={materialId=null},onExport={requestExport(listOf(readingMaterial.id),readingMaterial.title)},onShare={
             if(state.exportState?.running==true) model.notice("正在准备文件，请稍候") else {shareOnly=true;exportIds=listOf(readingMaterial.id)}
-        },exportState=state.exportState)
+        },exportState=state.exportState,onClassroom={openClassroom(it)})
         return
     }
-    if(loginOpen) {SchoolLoginScreen(model,{loginOpen=false});return}
     BackHandler(materialId!=null||courseId!=null||section!=Section.Library){goBack()}
     val destination=Destination(section,courseId,materialId)
     Scaffold(containerColor=MaterialTheme.colorScheme.background,
@@ -176,7 +193,7 @@ private fun KeyeApp(model: KeyeViewModel,mediaPath: (String) -> File,updates: Ap
                         onExport={id,name ->requestExport(listOf(id),name)},onBatchExport={ids,name ->requestExport(ids,name)},mediaPath=mediaPath,model=model)
                     route.section==Section.Library -> LibraryScreen(state,{courseId=it?:""},{materialId=it},{chooseImportCourse=true},
                         {id,name ->requestExport(listOf(id),name)},{ids,name ->requestExport(ids,name)},mediaPath,model,initialTab=if(libraryTrash) 2 else 1)
-                    route.section==Section.Acquire -> AcquireScreen(state,model,{requestLogin()},{model.download(it);section=Section.Tasks},onOpen={materialId=it})
+                    route.section==Section.Acquire -> AcquireScreen(state,model,{requestLogin()},{model.download(it);section=Section.Tasks},onOpen={materialId=it},onFollow={openClassroom(it)},onResumeFollow={model.resumeClassroom();classroomOpen=true})
                     route.section==Section.Tasks -> TasksScreen(state.tasks,model,onOpen={id ->
                         if(state.materials.any{it.id==id&&!it.deleted}) materialId=id else model.notice("课件已在回收站")
                     },onOutput={uri ->runCatching{context.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(uri),"application/pdf").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))}.onFailure{model.notice("无法打开文件，请确认文件仍存在且已安装 PDF 阅读器")}})

@@ -22,6 +22,8 @@ private val glyphs = mapOf(
     "last" to "M19 5v14 M5 5l8 7-8 7",
     "fit" to "M8 3H3v5 M16 3h5v5 M3 16v5h5 M21 16v5h-5 M8 8h8v8H8Z",
     "tools" to "M4 6h16 M4 12h16 M4 18h16 M8 3v6 M16 9v6 M10 15v6",
+    "live" to "M12 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4 M7 7a7 7 0 0 0 0 10 M17 7a7 7 0 0 1 0 10 M4 4a11 11 0 0 0 0 16 M20 4a11 11 0 0 1 0 16",
+    "pause" to "M8 5v14 M16 5v14",
     "library" to "M4 3h6v18H4z M14 3h6v18h-6z M6.5 7h1 M16.5 7h1 M6.5 17h1 M16.5 17h1",
     "download" to "M12 3v12 M7 10l5 5 5-5 M4 16v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4",
     "share" to "M8 12l8-5 M8 12l8 5 M5 9a3 3 0 1 0 0 6a3 3 0 0 0 0-6 M19 2a3 3 0 1 0 0 6a3 3 0 0 0 0-6 M19 16a3 3 0 1 0 0 6a3 3 0 0 0 0-6",

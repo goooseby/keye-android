@@ -30,13 +30,14 @@ data class Course(
 data class PageFile(
     val source: String,
     val preview: String,
-    val pdfPage: Int? = null
+    val pdfPage: Int? = null,
+    val remoteKey: String? = null
 ) {
-    fun json() = JSONObject().put("source", source).put("preview", preview).put("pdfPage", pdfPage)
+    fun json() = JSONObject().put("source", source).put("preview", preview).put("pdfPage", pdfPage).put("remoteKey",remoteKey)
     companion object {
         fun from(value: JSONObject) = PageFile(
             value.getString("source"), value.getString("preview"),
-            if (value.isNull("pdfPage")) null else value.getInt("pdfPage")
+            if (value.isNull("pdfPage")) null else value.getInt("pdfPage"),value.textOrNull("remoteKey")
         )
     }
 }
@@ -61,6 +62,8 @@ data class StudyMaterial(
     val readFraction: Float = 0f,
     val bookmarks: Set<Int> = emptySet(),
     val deleted: Boolean = false,
+    val schoolEntry: ScheduleEntry? = null,
+    val pageNotes: Map<Int,String> = emptyMap(),
     val touched: Long = System.currentTimeMillis()
 ) {
     val keptCount get() = pages.size - excluded.size
@@ -75,6 +78,8 @@ data class StudyMaterial(
         .put("exportRevision", exportRevision).put("exportUri", exportUri)
         .put("lastPage", lastPage).put("readAt", readAt).put("readOffset", readOffset).put("readFraction", readFraction.toDouble())
         .put("bookmarks", JSONArray(bookmarks.sorted())).put("deleted", deleted).put("touched", touched)
+        .put("schoolEntry",schoolEntry?.json())
+        .put("pageNotes",JSONObject().also {obj ->pageNotes.forEach {(page,text) ->obj.put(page.toString(),text)}})
 
     companion object {
         fun from(value: JSONObject): StudyMaterial {
@@ -100,6 +105,8 @@ data class StudyMaterial(
                 readFraction = value.optDouble("readFraction",0.0).toFloat().coerceIn(0f,.999f),
                 bookmarks = value.optJSONArray("bookmarks")?.let { a -> (0 until a.length()).map { a.getInt(it) }.toSet() } ?: emptySet(),
                 deleted = value.optBoolean("deleted"),
+                schoolEntry=value.optJSONObject("schoolEntry")?.let {ScheduleEntry.from(it)},
+                pageNotes=value.optJSONObject("pageNotes")?.let {obj ->obj.keys().asSequence().mapNotNull {key ->key.toIntOrNull()?.takeIf {it>0}?.let {it to obj.optString(key).take(2000)}}.toMap()} ?: emptyMap(),
                 touched = value.optLong("touched")
             )
         }

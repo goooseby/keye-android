@@ -18,6 +18,8 @@ data class SchoolAuth(
     val tenantId: String
 )
 
+class SchoolRateLimited(val retryAfterSeconds: Long): IllegalStateException("平台请求频率受限，稍后自动继续")
+
 class SchoolSessionExpired : IllegalStateException("学校登录已失效，请重新登录")
 
 class SchoolApi {
@@ -64,6 +66,8 @@ class SchoolApi {
         connection.connectTimeout = timeoutSeconds * 1000
         connection.readTimeout = timeoutSeconds * 1000
         connection.instanceFollowRedirects = false
+        connection.useCaches=false
+        connection.setRequestProperty("Cache-Control","no-cache")
         connection.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36")
         if (parsed.host == "video.jw.scut.edu.cn" && auth != null) {
             connection.setRequestProperty("Referer", HOME)
@@ -91,6 +95,7 @@ class SchoolApi {
                 return requestBytes(next.toString(), auth, timeoutSeconds, true, redirectCount + 1)
             }
             if (auth!=null && isSchoolAuthenticationFailure(connection.url.host,status,connection.getHeaderField("Location"),imageRequest=followImageRedirects)) throw SchoolSessionExpired()
+            if(status==429) throw SchoolRateLimited(connection.getHeaderField("Retry-After")?.toLongOrNull()?.coerceIn(3,300) ?: 30L)
             if (status !in 200..299) {
                 throw IllegalStateException("平台请求失败（HTTP $status），请检查登录状态和网络")
             }
@@ -183,7 +188,10 @@ class SchoolApi {
         return result.sortedBy(ScheduleEntry::day)
     }
 
-    fun imageUrls(auth: SchoolAuth, entry: ScheduleEntry, timeoutSeconds: Int): List<String> {
+    fun imageUrls(auth: SchoolAuth, entry: ScheduleEntry, timeoutSeconds: Int): List<String> =
+        imagePages(auth,entry,timeoutSeconds).map {it.url}.also {require(it.isNotEmpty()) {"这节课没有可用的课件页面"}}
+
+    fun imagePages(auth: SchoolAuth, entry: ScheduleEntry, timeoutSeconds: Int): List<ClassroomPage> {
         val response = getJson(
             "/pptnote/v1/schedule/search-ppt",
             mapOf(
@@ -200,8 +208,7 @@ class SchoolApi {
             val url = content.optString("pptimgurl").ifBlank { content.optString("pptthumb") }
             if (url.startsWith("https://")) urls += url
         }
-        require(urls.isNotEmpty()) { "这节课没有可用的课件页面" }
-        return urls.toList()
+        return urls.map {ClassroomPage(classroomPageKey(it),it)}.distinctBy {it.key}
     }
 
     fun image(auth: SchoolAuth, url: String, timeoutSeconds: Int): ByteArray =

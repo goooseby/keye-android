@@ -12,7 +12,7 @@ import java.io.File
 
 // Export ranges are independent of reading preferences and original documents.
 enum class ExportAction { Save, Share, SaveAndShare }
-data class ExportRequest(val ids: List<String>,val name: String,val pages: Map<String,Set<Int>>?=null,val action: ExportAction=ExportAction.Save,val origin: String="")
+data class ExportRequest(val ids: List<String>,val name: String,val pages: Map<String,Set<Int>>?=null,val action: ExportAction=ExportAction.Save,val origin: String="",val includeNotes: Boolean=true,val snapshots: List<StudyMaterial>?=null)
 data class ExportResult(val uri: Uri,val name: String,val location: String,val action: ExportAction,val mime: String="application/pdf")
 data class ExportState(val running: Boolean=false,val progress: Float=0f,val message: String="",val failed: Boolean=false,val retryable: Boolean=false,val result: ExportResult?=null,val autoShare: Boolean=false,val origin: String="")
 

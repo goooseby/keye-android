@@ -26,15 +26,17 @@ import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AcquireScreen(state: UiState,model: KeyeViewModel,onLogin: () -> Unit,onDownload: (List<ScheduleEntry>) -> Unit,onOpen: (String) -> Unit={}) {
+fun AcquireScreen(state: UiState,model: KeyeViewModel,onLogin: () -> Unit,onDownload: (List<ScheduleEntry>) -> Unit,onOpen: (String) -> Unit={},onFollow: (ScheduleEntry) -> Unit={},onResumeFollow: ()->Unit={}) {
     var pickingStart by remember{mutableStateOf<Boolean?>(null)}
     var start by remember(state.startDate){mutableStateOf(state.startDate)}
     var end by remember(state.endDate){mutableStateOf(state.endDate)}
     var selected by remember{mutableStateOf(emptySet<String>())}
     var expanded by remember(state.schedule) {mutableStateOf(emptySet<String>())}
     val groups=remember(state.schedule) {state.schedule.groupBy(ScheduleEntry::groupId)}
-    LaunchedEffect(state.schedule,state.materials) {
-        val available=state.schedule.filter{entry ->state.materials.none{it.sourceKey==entry.id}}.map(ScheduleEntry::id).toSet()
+    fun activeCapture(entry: ScheduleEntry)=state.classroom?.let {it.entry.id==entry.id && it.stage!=ClassroomStage.Ended}==true
+    fun selectable(entry: ScheduleEntry)=!activeCapture(entry) && state.materials.none {it.sourceKey==entry.id && (it.pages.isNotEmpty() || it.deleted)}
+    LaunchedEffect(state.schedule,state.materials,state.classroom?.entry?.id,state.classroom?.stage) {
+        val available=state.schedule.filter {selectable(it)}.map(ScheduleEntry::id).toSet()
         selected=selected.intersect(available)
     }
     AnimatedContent(state.loggedIn,transitionSpec={fadeIn(tween(220)) togetherWith fadeOut(tween(150))},label="account state") { connected ->
@@ -62,12 +64,17 @@ fun AcquireScreen(state: UiState,model: KeyeViewModel,onLogin: () -> Unit,onDown
                             }
                         }
                         Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                            SuggestionChip(onClick={end=LocalDate.now().toString();start=end;model.scan(start,end)},enabled=!state.busy,label={Text("今天")})
                             SuggestionChip(onClick={end=LocalDate.now().toString();start=LocalDate.now().minusDays(14).toString();model.scan(start,end)},enabled=!state.busy,label={Text("近两周")})
-                            SuggestionChip(onClick={end=LocalDate.now().toString();start=LocalDate.now().minusDays(30).toString();model.scan(start,end)},enabled=!state.busy,label={Text("近一月")})
                             Spacer(Modifier.weight(1f))
                             Text("${groups.size} 门 · ${state.schedule.size} 节",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
+                }
+                item {
+                    state.classroom?.let {session ->
+                        PreferenceRow("live","继续课堂跟看",session.entry.title+" · "+when(session.stage) {ClassroomStage.Ended ->"已结束";ClassroomStage.NeedsLogin ->"需登录";else ->"已保存，可继续"},onClick=onResumeFollow)
+                    } ?: Text("课次右侧的“跟看”可持续获取新增页面",Modifier.padding(horizontal=20.dp,vertical=8.dp),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 if(state.schedule.isEmpty()) item {EmptyState(if(state.busy) "clock" else "calendar",if(state.busy) "正在查询课表" else "暂无课次",detail=if(state.busy) null else "选择日期范围后查询")}
                 if(groups.isNotEmpty()) item {
@@ -82,7 +89,7 @@ fun AcquireScreen(state: UiState,model: KeyeViewModel,onLogin: () -> Unit,onDown
                 }
                 groups.forEach{(group,entries) ->
                     item(key="header:$group") {
-                        val available=entries.filter{entry ->state.materials.none{it.sourceKey==entry.id}}.map(ScheduleEntry::id).toSet()
+                        val available=entries.filter {selectable(it)}.map(ScheduleEntry::id).toSet()
                         val open=group in expanded
                         val chosen=entries.count {it.id in selected}
                         val rotation by animateFloatAsState(if(open) 90f else 0f,tween(180),label="course expansion")
@@ -99,15 +106,17 @@ fun AcquireScreen(state: UiState,model: KeyeViewModel,onLogin: () -> Unit,onDown
                         }
                     }
                     if(group in expanded) items(entries,key=ScheduleEntry::id){entry ->
-                        val downloaded=state.materials.any{it.sourceKey==entry.id}
+                        val downloaded=state.materials.any {it.sourceKey==entry.id && (it.pages.isNotEmpty() || it.deleted)}
                         val checked=entry.id in selected
                         val tone by animateColorAsState(if(checked) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,label="lecture selection")
-                        Surface(onClick={if(downloaded) state.materials.firstOrNull{it.sourceKey==entry.id}?.let{if(!it.deleted) onOpen(it.id) else model.notice("课件在回收站中，可在我的中恢复")} else selected=if(checked) selected-entry.id else selected+entry.id},color=tone,modifier=Modifier.animateItem()) {
+                        Surface(onClick={if(downloaded) state.materials.firstOrNull{it.sourceKey==entry.id}?.let{if(!it.deleted) onOpen(it.id) else model.notice("课件在回收站中，可在我的中恢复")} else if(activeCapture(entry)) onFollow(entry) else selected=if(checked) selected-entry.id else selected+entry.id},color=tone,modifier=Modifier.animateItem()) {
                             Column {
                                 Row(Modifier.fillMaxWidth().heightIn(min=52.dp).padding(start=24.dp,end=8.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(12.dp)) {
                                     AppIcon("document",modifier=Modifier.size(19.dp))
                                     Text(runCatching{LocalDate.parse(entry.day).format(DateTimeFormatter.ofPattern("M月d日  EEE",Locale.SIMPLIFIED_CHINESE))}.getOrDefault(entry.day),Modifier.weight(1f),style=MaterialTheme.typography.bodyMedium)
+                                    TextButton(onClick={onFollow(entry)},contentPadding=PaddingValues(horizontal=8.dp)) {AppIcon("live",modifier=Modifier.size(17.dp));Spacer(Modifier.width(4.dp));Text("跟看",style=MaterialTheme.typography.labelMedium)}
                                     if(downloaded) Text("打开",Modifier.padding(end=12.dp),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                                    else if(activeCapture(entry)) Text("待增页",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                                     else Checkbox(checked,{selected=if(it) selected+entry.id else selected-entry.id})
                                 }
                                 HorizontalDivider(Modifier.padding(start=55.dp),thickness=.5.dp,color=MaterialTheme.colorScheme.outlineVariant.copy(alpha=.5f))
