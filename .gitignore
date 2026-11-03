@@ -1,0 +1,27 @@
+.gradle/
+.kotlin/
+.cxx/
+.externalNativeBuild/
+.idea/
+**/build/
+local.properties
+*.iml
+.DS_Store
+captures/
+*.jks
+*.keystore
+
+# Local credentials, signing and device output
+.env
+.env.*
+!.env.example
+key.properties
+keystore.properties
+*.p12
+*.pfx
+*.pem
+*.apk
+*.aab
+*.apks
+*.log
+Thumbs.db

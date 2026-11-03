@@ -1,0 +1,183 @@
+package io.github.goooseby.keye
+
+import android.content.Intent
+import android.net.Uri
+import android.os.Bundle
+import android.webkit.CookieManager
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.*
+import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
+import java.io.File
+
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+        setContent { KeyeTheme { KeyeApp(viewModel(), {File(filesDir,it)}) } }
+    }
+}
+private enum class Section(val title: String,val short: String,val icon: String) {
+    Library("课程","课程","library"), Acquire("获取课件","获取","download"),
+    Tasks("任务","任务","tasks"), Settings("我的","我的","settings")
+}
+private data class Destination(val section: Section,val course: String?,val material: String?) {
+    val depth get()=if(material!=null) 2 else if(course!=null||section==Section.Tasks) 1 else 0
+    val key get()=material?.let{"material:$it"} ?: course?.let{"course:$it"} ?: section.name
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun KeyeApp(model: KeyeViewModel,mediaPath: (String) -> File) {
+    val state by model.state.collectAsState()
+    val context=LocalContext.current
+    val screens=rememberSaveableStateHolder()
+    var section by rememberSaveable{mutableStateOf(Section.Library)}
+    var tasksOrigin by rememberSaveable{mutableStateOf(Section.Acquire)}
+    var courseId by rememberSaveable{mutableStateOf<String?>(null)}
+    var materialId by rememberSaveable{mutableStateOf<String?>(null)}
+    var exportIds by rememberSaveable{mutableStateOf<List<String>>(emptyList())}
+    var shareOnly by rememberSaveable{mutableStateOf(false)}
+    var libraryTrash by rememberSaveable{mutableStateOf(false)}
+    var pendingImportCourseId by rememberSaveable{mutableStateOf<String?>(null)}
+    var chooseImportCourse by remember{mutableStateOf(false)}
+    var loginOpen by rememberSaveable{mutableStateOf(false)}
+    val snackbar=remember{SnackbarHostState()}
+    val importLauncher=rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) {uris ->
+        if(uris.isNotEmpty()) {
+            uris.forEach{uri -> runCatching{context.contentResolver.takePersistableUriPermission(uri,Intent.FLAG_GRANT_READ_URI_PERMISSION)}}
+            model.importFiles(uris,pendingImportCourseId);courseId=null;materialId=null;section=Section.Tasks
+        }
+        pendingImportCourseId=null
+    }
+    fun requestExport(ids: List<String>,name: String) {
+        if(state.exportState?.running==true) {model.notice("正在导出，请稍候");return}
+        shareOnly=false;exportIds=ids
+    }
+    fun requestImport(destination: String?) {
+        pendingImportCourseId=destination
+        importLauncher.launch(arrayOf("image/*","application/pdf"))
+    }
+    fun requestLogin() {
+        if(state.loggedIn) {
+            model.logout()
+            CookieManager.getInstance().removeAllCookies{loginOpen=true}
+        } else loginOpen=true
+    }
+    fun goBack() {if(materialId!=null) materialId=null else if(courseId!=null) courseId=null else section=if(section==Section.Tasks) tasksOrigin else Section.Library}
+    LaunchedEffect(Unit) {
+        SchoolApi.authFromCookies(CookieManager.getInstance().getCookie(SchoolApi.HOME))?.let{model.login(it.cookie,silent=true)}
+    }
+    LaunchedEffect(state.notice) {state.notice?.let{snackbar.showSnackbar(it);if(model.state.value.notice==it) model.notice(null)}}
+    if(exportIds.isNotEmpty()) {
+        val materials=exportIds.mapNotNull { id ->state.materials.firstOrNull { it.id==id } }
+        if(materials.isNotEmpty()) ExportSheet(materials,shareOnly,onDismiss={exportIds=emptyList()},onSubmit={model.export(it.copy(origin=materialId?:section.name));exportIds=emptyList()})
+    }
+    val readingMaterial=state.materials.firstOrNull {it.id==materialId && !it.deleted}
+    if(readingMaterial!=null) {
+        ReaderScreen(readingMaterial,model,mediaPath,onBack={materialId=null},onExport={requestExport(listOf(readingMaterial.id),readingMaterial.title)},onShare={
+            if(state.exportState?.running==true) model.notice("正在准备文件，请稍候") else {shareOnly=true;exportIds=listOf(readingMaterial.id)}
+        },exportState=state.exportState)
+        return
+    }
+    if(loginOpen) {SchoolLoginScreen(model,{loginOpen=false});return}
+    BackHandler(materialId!=null||courseId!=null||section!=Section.Library){goBack()}
+    val destination=Destination(section,courseId,materialId)
+    Scaffold(containerColor=MaterialTheme.colorScheme.background,
+        topBar={
+            Surface(color=MaterialTheme.colorScheme.background) {
+                Row(Modifier.fillMaxWidth().statusBarsPadding().height(64.dp).padding(start=if(destination.depth==0) 24.dp else 8.dp,end=20.dp),verticalAlignment=Alignment.CenterVertically) {
+                    if(destination.depth>0) IconButton(onClick={goBack()}){AppIcon("back","返回")}
+                    Text(when {
+                        materialId!=null -> state.materials.firstOrNull{it.id==materialId}?.title?:"课件"
+                        courseId!=null -> state.courses.firstOrNull{it.id==courseId}?.title?:"未归类"
+                        else -> section.title
+                    },Modifier.weight(1f).padding(start=if(destination.depth>0) 4.dp else 0.dp),style=MaterialTheme.typography.titleLarge,maxLines=1,overflow=TextOverflow.Ellipsis)
+                    if(section==Section.Acquire && destination.depth==0) IconButton(onClick={tasksOrigin=Section.Acquire;section=Section.Tasks}) {
+                        BadgedBox(badge={val active=state.tasks.count {it.status in setOf("queued","running")};if(active>0) Badge {Text(active.toString())}}) {AppIcon("tasks","下载管理")}
+                    }
+                }
+            }
+        },
+        bottomBar={
+            if(destination.depth==0) Surface(color=MaterialTheme.colorScheme.surface) {
+                Column {
+                    HorizontalDivider(color=MaterialTheme.colorScheme.outlineVariant.copy(alpha=.45f),thickness=.5.dp)
+                    NavigationBar(containerColor=MaterialTheme.colorScheme.surfaceContainer,tonalElevation=0.dp) {
+                        listOf(Section.Library,Section.Acquire,Section.Settings).forEach{item ->
+                            val scale by animateFloatAsState(if(section==item) 1.08f else 1f,spring(stiffness=500f),label="navigation icon")
+                            NavigationBarItem(selected=section==item,onClick={section=item;if(item==Section.Library) libraryTrash=false},
+                                icon={
+                                    val active=state.tasks.count{it.status in setOf("running","queued")}
+                                    BadgedBox(badge={if(item==Section.Tasks&&active>0) Badge{Text(active.toString())}}) {
+                                        AppIcon(item.icon,modifier=Modifier.graphicsLayer{scaleX=scale;scaleY=scale})
+                                    }
+                                },label={Text(item.short,style=MaterialTheme.typography.labelMedium)},
+                                colors=NavigationBarItemDefaults.colors(indicatorColor=MaterialTheme.colorScheme.primaryContainer,
+                                    selectedIconColor=MaterialTheme.colorScheme.primary,selectedTextColor=MaterialTheme.colorScheme.primary,
+                                    unselectedIconColor=MaterialTheme.colorScheme.onSurfaceVariant,unselectedTextColor=MaterialTheme.colorScheme.onSurfaceVariant))
+                        }
+                    }
+                }
+            }
+        },snackbarHost={SnackbarHost(snackbar)}) {padding ->
+        if(state.loading) Box(Modifier.fillMaxSize().padding(padding),contentAlignment=Alignment.Center) {
+            CircularProgressIndicator(Modifier.size(24.dp),strokeWidth=2.dp)
+        } else if(state.loadError!=null) Box(Modifier.fillMaxSize().padding(padding),contentAlignment=Alignment.Center) {
+            EmptyState("error","资料库无法读取",detail=state.loadError)
+        } else AnimatedContent(destination,modifier=Modifier.fillMaxSize().padding(padding),
+            transitionSpec={
+                if(targetState.depth>initialState.depth) (slideInHorizontally(tween(270,easing=FastOutSlowInEasing)){it/5}+fadeIn(tween(220))) togetherWith (fadeOut(tween(120))+slideOutHorizontally(tween(240)){-it/16})
+                else if(targetState.depth<initialState.depth) (slideInHorizontally(tween(250,easing=FastOutSlowInEasing)){-it/12}+fadeIn(tween(200))) togetherWith (slideOutHorizontally(tween(230)){it/5}+fadeOut(tween(150)))
+                else (fadeIn(tween(190))+slideInVertically(tween(220)){it/40}) togetherWith fadeOut(tween(100))
+            },label="page transition") {route ->
+            screens.SaveableStateProvider(route.key) {
+                val material=state.materials.firstOrNull{it.id==route.material}
+                val course=state.courses.firstOrNull{it.id==route.course}
+                when {
+                    material!=null -> Unit
+                    route.course!=null -> CourseScreen(course,state.courses,state.materials.filter{it.courseId==route.course.takeIf(String::isNotEmpty)&&!it.deleted},
+                        onOpen={materialId=it},onImport={requestImport(route.course.takeIf(String::isNotEmpty))},
+                        onExport={id,name ->requestExport(listOf(id),name)},onBatchExport={ids,name ->requestExport(ids,name)},mediaPath=mediaPath,model=model)
+                    route.section==Section.Library -> LibraryScreen(state,{courseId=it?:""},{materialId=it},{chooseImportCourse=true},
+                        {id,name ->requestExport(listOf(id),name)},{ids,name ->requestExport(ids,name)},mediaPath,model,initialTab=if(libraryTrash) 2 else 1)
+                    route.section==Section.Acquire -> AcquireScreen(state,model,{requestLogin()},{model.download(it);section=Section.Tasks},onOpen={materialId=it})
+                    route.section==Section.Tasks -> TasksScreen(state.tasks,model,onOpen={id ->
+                        if(state.materials.any{it.id==id&&!it.deleted}) materialId=id else model.notice("课件已在回收站")
+                    },onOutput={uri ->runCatching{context.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(uri),"application/pdf").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))}.onFailure{model.notice("无法打开文件，请确认文件仍存在且已安装 PDF 阅读器")}})
+                    route.section==Section.Settings -> SettingsScreen(state,model,{requestLogin()},onTasks={tasksOrigin=Section.Settings;section=Section.Tasks},onTrash={libraryTrash=true;section=Section.Library})
+                }
+            }
+        }
+    }
+    if(state.exportState!=null) Box(Modifier.fillMaxSize().navigationBarsPadding().padding(bottom=82.dp),contentAlignment=Alignment.BottomCenter) {ExportFeedback(state.exportState,model,section.name)}
+    if(chooseImportCourse) ModalBottomSheet(onDismissRequest={chooseImportCourse=false},sheetState=rememberModalBottomSheetState(skipPartiallyExpanded=true)) {
+        Column(Modifier.heightIn(max=540.dp).verticalScroll(rememberScrollState()).padding(start=20.dp,end=20.dp,bottom=24.dp)) {
+            SheetHeading("导入到",{chooseImportCourse=false})
+            Surface(shape=MaterialTheme.shapes.large,color=MaterialTheme.colorScheme.surface) {
+                Column {
+                    PreferenceRow("folder","未归类",onClick={chooseImportCourse=false;requestImport(null)})
+                    state.courses.sortedBy(Course::title).forEach{course ->
+                        HorizontalDivider(Modifier.padding(start=70.dp),color=MaterialTheme.colorScheme.outlineVariant.copy(alpha=.45f))
+                        PreferenceRow("library",course.title,course.term.takeIf{it.isNotBlank()},onClick={chooseImportCourse=false;requestImport(course.id)})
+                    }
+                }
+            }
+        }
+    }
+}
