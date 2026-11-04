@@ -75,10 +75,10 @@ class MainActivity : ComponentActivity() {
 }
 private enum class Section(val title: String,val short: String,val icon: String) {
     Timetable("课表","课表","calendar"), Library("课程","课程","library"), Acquire("批量获取","获取","download"),
-    Tasks("任务","任务","tasks"), Settings("我的","我的","settings")
+    Tasks("任务","任务","tasks"), Trash("回收站","回收站","trash"), Settings("我的","我的","settings")
 }
 private data class Destination(val section: Section,val course: String?,val material: String?) {
-    val depth get()=if(material!=null) 2 else if(course!=null||section in setOf(Section.Tasks,Section.Acquire)) 1 else 0
+    val depth get()=if(material!=null) 2 else if(course!=null||section in setOf(Section.Tasks,Section.Acquire,Section.Trash)) 1 else 0
     val key get()=material?.let{"material:$it"} ?: course?.let{"course:$it"} ?: section.name
 }
 
@@ -96,7 +96,6 @@ private fun KeyeApp(model: KeyeViewModel,mediaPath: (String) -> File,updates: Ap
     var acquireOrigin by rememberSaveable {mutableStateOf(Section.Timetable)}
     var exportIds by rememberSaveable{mutableStateOf<List<String>>(emptyList())}
     var shareOnly by rememberSaveable{mutableStateOf(false)}
-    var libraryTrash by rememberSaveable{mutableStateOf(false)}
     var pendingImportCourseId by rememberSaveable{mutableStateOf<String?>(null)}
     var chooseImportCourse by remember{mutableStateOf(false)}
     var classroomOpen by rememberSaveable {mutableStateOf(false)}
@@ -136,7 +135,7 @@ private fun KeyeApp(model: KeyeViewModel,mediaPath: (String) -> File,updates: Ap
             if(state.loggedIn) model.download(listOf(entry))
         } else {pendingLesson=entry.json().toString();pendingStarted=false;pendingError=null}
     }
-    fun goBack() {if(materialId!=null) materialId=null else if(courseId!=null) courseId=null else section=if(section==Section.Tasks) tasksOrigin else if(section==Section.Acquire) acquireOrigin else Section.Timetable}
+    fun goBack() {if(materialId!=null) materialId=null else if(courseId!=null) courseId=null else section=if(section==Section.Tasks) tasksOrigin else if(section==Section.Acquire) acquireOrigin else if(section==Section.Trash) Section.Settings else Section.Timetable}
     val lifecycleOwner=LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer=LifecycleEventObserver {_,event ->
@@ -232,7 +231,7 @@ private fun KeyeApp(model: KeyeViewModel,mediaPath: (String) -> File,updates: Ap
                     NavigationBar(containerColor=MaterialTheme.colorScheme.surfaceContainer,tonalElevation=0.dp) {
                         listOf(Section.Timetable,Section.Library,Section.Settings).forEach{item ->
                             val scale by animateFloatAsState(if(section==item) 1.08f else 1f,spring(stiffness=500f),label="navigation icon")
-                            NavigationBarItem(selected=section==item,onClick={section=item;if(item==Section.Library) libraryTrash=false},
+                            NavigationBarItem(selected=section==item,onClick={section=item},
                                 icon={
                                     val active=state.tasks.count{it.status in setOf("running","queued")}
                                     BadgedBox(badge={if(item==Section.Tasks&&active>0) Badge{Text(active.toString())}}) {
@@ -267,12 +266,14 @@ private fun KeyeApp(model: KeyeViewModel,mediaPath: (String) -> File,updates: Ap
                         onExport={id,name ->requestExport(listOf(id),name)},onBatchExport={ids,name ->requestExport(ids,name)},mediaPath=mediaPath,model=model)
                     route.section==Section.Timetable -> TimetableScreen(state,model,{requestLogin()},{openLesson(it)},{openClassroom(it)})
                     route.section==Section.Library -> LibraryScreen(state,{courseId=it?:""},{materialId=it},{chooseImportCourse=true},
-                        {id,name ->requestExport(listOf(id),name)},{ids,name ->requestExport(ids,name)},mediaPath,model,initialTab=if(libraryTrash) 2 else 1,onFollow={openClassroom(it)},onTimetable={section=Section.Timetable})
+                        {id,name ->requestExport(listOf(id),name)},{ids,name ->requestExport(ids,name)},mediaPath,model,onFollow={openClassroom(it)},onTimetable={section=Section.Timetable})
+                    route.section==Section.Trash -> LibraryScreen(state,{},{},{},
+                        {id,name ->requestExport(listOf(id),name)},{_,_ ->},mediaPath,model,initialTab=2,trashMode=true)
                     route.section==Section.Acquire -> AcquireScreen(state,model,{requestLogin()},{model.download(it);tasksOrigin=Section.Acquire;section=Section.Tasks},onOpen={materialId=it},onFollow={openClassroom(it)},onResumeFollow={model.resumeClassroom();classroomOpen=true})
                     route.section==Section.Tasks -> TasksScreen(state.tasks,model,onOpen={id ->
                         if(state.materials.any{it.id==id&&!it.deleted}) materialId=id else model.notice("课件已在回收站")
                     },onOutput={uri ->runCatching{context.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(uri),"application/pdf").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))}.onFailure{model.notice("无法打开文件，请确认文件仍存在且已安装 PDF 阅读器")}})
-                    route.section==Section.Settings -> SettingsScreen(state,model,{requestLogin()},onTasks={tasksOrigin=Section.Settings;section=Section.Tasks},onTrash={libraryTrash=true;section=Section.Library},onUpdates={updates.showDetails()},updateStatus=when(updateState.download.stage) {
+                    route.section==Section.Settings -> SettingsScreen(state,model,{requestLogin()},onTasks={tasksOrigin=Section.Settings;section=Section.Tasks},onTrash={section=Section.Trash},onUpdates={updates.showDetails()},updateStatus=when(updateState.download.stage) {
                         UpdateDownloadStage.Downloading ->updateState.download.message
                         UpdateDownloadStage.Ready ->"${updateState.release?.version} 已下载，点击安装"
                         else ->updateState.release?.let {"发现新版本 ${it.version}"}

@@ -66,13 +66,14 @@ internal fun courseTone(key: String): Pair<Color, Color> {
 @Composable
 fun LibraryScreen(state: UiState, onCourse: (String?) -> Unit, onMaterial: (String) -> Unit,
     onImport: () -> Unit, onExport: (String, String) -> Unit, onBatchExport: (List<String>, String) -> Unit,
-    mediaPath: (String) -> File, model: KeyeViewModel, initialTab: Int=1,onFollow: (ScheduleEntry)->Unit={},onTimetable: ()->Unit={}) {
+    mediaPath: (String) -> File, model: KeyeViewModel, initialTab: Int=1,onFollow: (ScheduleEntry)->Unit={},onTimetable: ()->Unit={},trashMode: Boolean=false) {
     var liveNow by remember {mutableLongStateOf(System.currentTimeMillis())}
     LaunchedEffect(Unit) {while(true) {liveNow=System.currentTimeMillis();delay(15_000)}}
     val hasLive=state.loggedIn && !state.timetable.fromCache && state.timetable.error==null && scheduleIsFresh(state.timetable.checkedAt,liveNow) && state.timetable.entries.any {it.status==1 && it.day==schoolToday().toString()}
     var search by rememberSaveable { mutableStateOf("") }
     var tab by rememberSaveable(initialTab) { mutableIntStateOf(initialTab) }
     var newCourse by remember { mutableStateOf(false) }
+    var restore by remember {mutableStateOf<StudyMaterial?>(null)}
     var selected by remember { mutableStateOf(emptySet<String>()) }
     BackHandler(selected.isNotEmpty()) { selected=emptySet() }
     val largeType=LocalDensity.current.fontScale>1.2f
@@ -87,7 +88,7 @@ fun LibraryScreen(state: UiState, onCourse: (String?) -> Unit, onMaterial: (Stri
                 if(selecting) Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal=12.dp), verticalAlignment=Alignment.CenterVertically) {
                     IconButton(onClick={selected=emptySet()}) {AppIcon("close", "结束选择")}
                     Text("已选 ${chosen.size} 份", style=MaterialTheme.typography.titleMedium)
-                } else PillTabs(if(tab==2) listOf("最近阅读","全部课程","回收站") else listOf("最近阅读","全部课程"), if(tab==0) 1 else if(tab==1) 0 else 2, {tab=if(it==0) 1 else if(it==1) 0 else 2;search=""}, Modifier.padding(horizontal=20.dp, vertical=4.dp))
+                } else if(!trashMode) PillTabs(if(tab==2) listOf("最近阅读","全部课程","回收站") else listOf("最近阅读","全部课程"), if(tab==0) 1 else if(tab==1) 0 else 2, {tab=if(it==0) 1 else if(it==1) 0 else 2;search=""}, Modifier.padding(horizontal=20.dp, vertical=4.dp))
             }
             LazyVerticalGrid(columns=if(largeType) GridCells.Fixed(1) else GridCells.Adaptive(148.dp), modifier=Modifier.weight(1f),
                 contentPadding=PaddingValues(start=20.dp,end=20.dp,top=12.dp,bottom=if(tab==0 && selected.isEmpty()) 24.dp else 100.dp),
@@ -122,7 +123,7 @@ fun LibraryScreen(state: UiState, onCourse: (String?) -> Unit, onMaterial: (Stri
                     item(span={GridItemSpan(maxLineSpan)}) {Text(if(tab==2) "${listed.size} 份已移除的课件" else if(listed.any{it.readAt>0}) "继续阅读" else "最近加入",style=MaterialTheme.typography.labelMedium,color=MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.padding(vertical=4.dp))}
                     if(listed.isEmpty()) item(span={GridItemSpan(maxLineSpan)}) {EmptyState(if(tab==2) "trash" else "document",if(search.isNotBlank()) "没有找到课件" else if(tab==2) "回收站为空" else "暂无课件",action=if(tab==1 && search.isBlank()) "导入资料" else null,onAction=onImport)}
                     items(listed,key=StudyMaterial::id,span={GridItemSpan(maxLineSpan)}) { m ->
-                        MaterialCard(m,{onMaterial(m.id)},{onExport(m.id,m.title)},{model.setDeleted(m.id,!m.deleted)},mediaPath,
+                        MaterialCard(m,{if(m.deleted) restore=m else onMaterial(m.id)},{onExport(m.id,m.title)},{model.setDeleted(m.id,!m.deleted)},mediaPath,
                             selected=if(selected.isNotEmpty()) m.id in selected else null,
                             onSelect={selected=if(m.id in selected) selected-m.id else selected+m.id},
                             onLongPress=if(!m.deleted) ({selected=selected+m.id}) else null,modifier=Modifier.animateItem())
@@ -143,6 +144,9 @@ fun LibraryScreen(state: UiState, onCourse: (String?) -> Unit, onMaterial: (Stri
         }
     }
     if(newCourse) CourseDialog(null,{newCourse=false}) {title,term -> model.createCourse(title,term);newCourse=false}
+    restore?.let {material ->AlertDialog(onDismissRequest={restore=null},title={Text("恢复课件？")},text={Text(material.title)},
+        confirmButton={TextButton(onClick={model.setDeleted(material.id,false);restore=null}) {Text("恢复")}},
+        dismissButton={TextButton(onClick={restore=null}) {Text("取消")}})}
 }
 
 @Composable
@@ -260,7 +264,7 @@ fun MaterialCard(material: StudyMaterial,onOpen: () -> Unit,onExport: () -> Unit
     val background by animateColorAsState(if(selected==true) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,label="material selection")
     val border by animateColorAsState(if(selected==true) MaterialTheme.colorScheme.primary.copy(alpha=.4f) else MaterialTheme.colorScheme.surfaceContainer,label="material border")
     Surface(modifier=modifier.fillMaxWidth(),shape=RoundedCornerShape(19.dp),color=background,border=BorderStroke(1.dp,border)) {
-        Row(Modifier.combinedClickable(onClick={if(selected!=null) onSelect?.invoke() else if(!material.deleted) onOpen()},onLongClick={if(onLongPress!=null){haptic.performHapticFeedback(HapticFeedbackType.LongPress);onLongPress()}})
+        Row(Modifier.combinedClickable(onClick={if(selected!=null) onSelect?.invoke() else onOpen()},onLongClick={if(onLongPress!=null){haptic.performHapticFeedback(HapticFeedbackType.LongPress);onLongPress()}})
             .padding(start=14.dp,end=6.dp,top=14.dp,bottom=14.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(13.dp)) {
             if(selected!=null) Checkbox(selected,{onSelect?.invoke()},modifier=Modifier.size(48.dp))
             Box(Modifier.size(54.dp,72.dp).clip(RoundedCornerShape(7.dp)).background(MaterialTheme.colorScheme.surfaceVariant)) {
