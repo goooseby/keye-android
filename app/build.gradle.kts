@@ -12,8 +12,8 @@ android {
         applicationId = "io.github.goooseby.keye"
         minSdk = 26
         targetSdk = 35
-        versionCode = providers.gradleProperty("keyeVersionCode").orElse("4").get().toInt()
-        versionName = providers.gradleProperty("keyeVersionName").orElse("0.2.0").get()
+        versionCode = providers.gradleProperty("keyeVersionCode").orElse("5").get().toInt()
+        versionName = providers.gradleProperty("keyeVersionName").orElse("0.2.1").get()
     }
 
     val releaseStorePath = providers.environmentVariable("KEYE_KEYSTORE_PATH").orNull

@@ -23,6 +23,8 @@ ReaderMedia 从原文件解码，PDF 原页在普通显示时按最长边 1800 �
 
 ScheduleEntry 持久化可空 startsAt／endsAt，SchoolApi 将课表 start_at／end_at 的 Unix 秒转换为毫秒；AcquireScreen 每十五秒本地判断 start ≤ now < end，仅上课时显示跟看快捷按钮。SchedulePolicy 计算最近已到来的学期边界附近周一，快捷查询仍可手动调整，接口最大范围为 220 天。
 
+普通下载与跟看共用 ClassroomPageSource。一次性同步重新查询目录，用 remoteKey 去重，以唯一文件名逐页保存并在 materialMutex 内提交；失败或取消后已经提交的页仍可读。remotePageCount 为可空的已观察目录数量，兼容旧 JSON。获取页不再把“有页面”等同于“不能继续下载”，所有未删除、未被活动跟看占用的课次均可检查并补全。
+
 ## 课堂跟看与页批注
 
 ClassroomScreen 是独立的课堂观看状态，复用 ReaderCanvas 与全屏播放器控件。ClassroomSession 表达连接、等待、已连接、暂停、重试、需要登录与结束；跟随开关属于观看状态，通过可保存状态保留，手动翻页和拖动交互暂停跟随，后台同步暂停与回看互不混淆。原始页码通过 retainedPageIndices 映射，移除页不重新出现在跟看中。

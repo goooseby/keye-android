@@ -301,19 +301,22 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
         classroomGeneration.incrementAndGet();classroomJob?.cancel()
         mutableState.update {it.copy(classroom=it.classroom?.copy(stage=ClassroomStage.Ended,fetching=false,message="跟看已结束，课件已保留"))}
     }
+    private fun createPageSource(live: Boolean=false): ClassroomPageSource? {
+        val credentials=auth
+        return classroomSourceFactory?.invoke() ?: credentials?.let {captured ->object: ClassroomPageSource {
+            override val credentials=captured
+            override fun owns(entry: ScheduleEntry)=SchoolApi.ownsEntry(captured,entry)
+            private fun checkAccount() {if(auth?.jwt!=captured.jwt || auth?.userId!=captured.userId) throw SchoolSessionExpired()}
+            override fun pages(entry: ScheduleEntry): List<ClassroomPage> {checkAccount();return school.imagePages(captured,entry,if(live) state.value.settings.timeoutSeconds.coerceAtMost(12) else state.value.settings.timeoutSeconds)}
+            override fun image(page: ClassroomPage): ByteArray {checkAccount();return school.image(captured,page.url,if(live) state.value.settings.timeoutSeconds.coerceAtMost(12) else state.value.settings.timeoutSeconds)}
+        }}
+    }
     fun startClassroom(entry: ScheduleEntry) {
         val previous=state.value.classroom
         if(previous?.entry?.id==entry.id && classroomJob?.isActive==true) {resumeClassroom();return}
         if(entry.id in queuedSources) {notice("此课次正在下载，请完成或取消下载后再跟看");return}
         val interval=getApplication<Application>().getSharedPreferences("classroom",0).getInt("interval",3).takeIf {it in setOf(3,5,10)} ?: 3
-        val credentials=auth
-        val source=classroomSourceFactory?.invoke() ?: credentials?.let {captured ->object: ClassroomPageSource {
-            override val credentials=captured
-            override fun owns(entry: ScheduleEntry)=SchoolApi.ownsEntry(captured,entry)
-            private fun checkAccount() {if(auth?.jwt!=captured.jwt || auth?.userId!=captured.userId) throw SchoolSessionExpired()}
-            override fun pages(entry: ScheduleEntry): List<ClassroomPage> {checkAccount();return school.imagePages(captured,entry,state.value.settings.timeoutSeconds.coerceAtMost(12))}
-            override fun image(page: ClassroomPage): ByteArray {checkAccount();return school.image(captured,page.url,state.value.settings.timeoutSeconds.coerceAtMost(12))}
-        }}
+        val source=createPageSource(live=true)
         val generation=classroomGeneration.incrementAndGet()
         classroomJob?.cancel();classroomManuallyPaused=false
         mutableState.update {it.copy(classroom=ClassroomSession(entry,previous?.takeIf {it.entry.id==entry.id}?.materialId ?: state.value.materials.firstOrNull {it.sourceKey==entry.id && !it.deleted}?.id,
@@ -368,6 +371,7 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
                             val current=store.material(initial.id) ?: error("课件不存在")
                             check(!current.deleted) {"课件已移入回收站，请恢复后重新跟看"}
                             val pending=pendingClassroomPages(current.pages.mapNotNull {it.remoteKey}.toSet(),catalog).asReversed()
+                            editMaterial(initial.id) {it.copy(remotePageCount=maxOf(it.remotePageCount ?: 0,catalog.size))}
                             publish {it.copy(remoteCount=catalog.size)}
                             for((position,remote) in pending.take(3).withIndex()) {
                                 coroutineContext.ensureActive()
@@ -553,12 +557,43 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
         }
     }
 
+    private fun legacyHashes(material: StudyMaterial): Map<String,List<Byte>> = material.pages.filter {it.remoteKey==null}.mapNotNull {page ->
+        runCatching {page.source to java.security.MessageDigest.getInstance("SHA-256").digest(media.file(page.source).readBytes()).toList()}.getOrNull()
+    }.toMap()
+
+    private suspend fun commitSchoolPage(id: String,remote: ClassroomPage,bytes: ByteArray,catalog: List<ClassroomPage>,legacy: Map<String,List<Byte>>) {
+        val hash=java.security.MessageDigest.getInstance("SHA-256").digest(bytes).toList()
+        var created:PageFile?=null
+        var committed=false
+        try {
+            materialMutex.withLock {
+                coroutineContext.ensureActive()
+                val latest=store.material(id) ?: error("课件不存在")
+                check(!latest.deleted) {"课件在回收站中，请先恢复"}
+                if(latest.pages.any {it.remoteKey==remote.key}) return@withLock
+                val matched=legacy.entries.firstOrNull {(source,digest) ->digest==hash && latest.pages.any {it.source==source && it.remoteKey==null}}?.key
+                val changed=if(matched!=null) latest.copy(pages=latest.pages.map {if(it.source==matched) it.copy(remoteKey=remote.key) else it})
+                    else {created=media.classroomImage(id,remote.key,bytes);insertClassroomPage(latest,created!!,catalog)}
+                coroutineContext.ensureActive()
+                store.put(changed);committed=true
+                mutableState.update {it.copy(materials=it.materials.filterNot {m ->m.id==id}+changed)}
+            }
+        } finally {if(!committed) created?.let(media::discardClassroomPage)}
+    }
+
+    private fun releasePausedClassroom(entry: ScheduleEntry): Boolean {
+        val session=state.value.classroom
+        if(session?.entry?.id!=entry.id || session.stage==ClassroomStage.Ended) return true
+        if(classroomForeground) {notice("请先退出跟看，再补全课件");return false}
+        endClassroom()
+        return true
+    }
+
     fun download(entries: List<ScheduleEntry>) {
-        val credentials=auth ?: run {notice("请先登录学校平台");return}
+        val source=createPageSource() ?: run {notice("请先登录学校平台");return}
         val accepted=entries.distinctBy(ScheduleEntry::id).filter {entry ->
-            if(state.value.classroom?.let {it.entry.id==entry.id && it.stage!=ClassroomStage.Ended}==true) {notice("该课次正在跟看，无需重复下载");false}
-            else if(!SchoolApi.ownsEntry(credentials,entry)) {notice("请使用查询这些课次的学校账号登录");false}
-            else queuedSources.add(entry.id)
+            if(!source.owns(entry)) {notice("请使用查询这些课次的学校账号登录");false}
+            else releasePausedClassroom(entry) && queuedSources.add(entry.id)
         }
         if(accepted.isEmpty()) return
         viewModelScope.launch(Dispatchers.IO) {
@@ -572,10 +607,9 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
                     val job=viewModelScope.launch(Dispatchers.IO,start=CoroutineStart.LAZY) {
                         try {
                             downloadSlots.withPermit {
-                                if(auth!=credentials) throw CancellationException("学校账号已断开")
-                                downloadTask(task,entry,credentials)
+                                downloadTask(task,entry,source)
                             }
-                        } catch(_: CancellationException) {putTask(task.copy(status="cancelled",message="已取消"))}
+                        } catch(_: CancellationException) {if(state.value.tasks.firstOrNull {it.id==task.id}?.status!="cancelled") putTask(task.copy(status="cancelled",message="已取消"))}
                         finally {queuedSources.remove(entry.id);jobs.remove(task.id)}
                     }
                     jobs[task.id]=job
@@ -590,65 +624,52 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
         }
     }
 
-    private suspend fun downloadTask(task: TaskRecord, entry: ScheduleEntry, credentials: SchoolAuth) {
-        val existing = store.materialBySource(entry.id)
-        if (existing != null && (existing.pages.isNotEmpty() || existing.deleted)) {
-            putTask(task.copy(status = "done", progress = 100,
-                message = if (existing.deleted) "课件位于回收站" else "资料库中已有此课件",
-                materialId = existing.id))
-            return
-        }
-        var savedMaterial: StudyMaterial? = null
+    private suspend fun downloadTask(task: TaskRecord, entry: ScheduleEntry, source: ClassroomPageSource) {
+        var materialId:String?=null
         try {
-            putTask(task.copy(status = "running", message = "正在读取课件列表"))
-            val settings = state.value.settings
-            val urls = school.imageUrls(credentials, entry, settings.timeoutSeconds)
-            val pages = mutableListOf<PageFile>()
-            urls.forEachIndexed { index, url ->
+            putTask(task.copy(status="running",message="正在检查可用页面"))
+            val settings=state.value.settings
+            val catalog=source.pages(entry).distinctBy {it.key}
+            require(catalog.isNotEmpty()) {"这节课暂时没有可用页面，已有内容已保留"}
+            coroutineContext.ensureActive()
+            if(source.credentials!=null && auth!=source.credentials) throw CancellationException("学校账号已断开")
+            val material=materialMutex.withLock {
+                val old=store.materialBySource(entry.id)
+                check(old?.deleted!=true) {"课件在回收站中，请先恢复"}
+                check(old==null || old.kind=="images") {"此课件类型不支持补全"}
+                val current=(old ?: StudyMaterial(id=task.id,sourceKey=entry.id,title=entry.title,day=entry.day,courseId=entry.groupId,kind="images",pages=emptyList()))
+                    .copy(schoolEntry=entry,remotePageCount=maxOf(old?.remotePageCount ?: 0,catalog.size))
+                if(store.courses().none {it.id==entry.groupId}) store.put(Course(id=entry.groupId,title=entry.title))
+                store.put(current);refreshLibrary();current
+            }
+            materialId=material.id
+            val legacy=legacyHashes(material)
+            val pending=pendingClassroomPages(material.pages.mapNotNull {it.remoteKey}.toSet(),catalog)
+            for((index,remote) in pending.withIndex()) {
                 coroutineContext.ensureActive()
-                if(auth!=credentials) throw CancellationException("学校账号已断开")
-                var pageFile: PageFile? = null
-                var failure: Exception? = null
-                for (attempt in 1..settings.retryCount) {
-                    try {
-                        pageFile = media.downloadedImage(
-                            task.id, index, school.image(credentials, url, settings.timeoutSeconds)
-                        ).copy(remoteKey=classroomPageKey(url))
-                        coroutineContext.ensureActive()
-                        break
-                    } catch (error: CancellationException) {
-                        throw error
-                    } catch (error: Exception) {
-                        if(error is SchoolSessionExpired) throw error
-                        failure = error
-                        if (attempt < settings.retryCount) kotlinx.coroutines.delay(300L * attempt)
+                var bytes:ByteArray?=null
+                var failure:Exception?=null
+                for(attempt in 1..settings.retryCount) {
+                    try {bytes=source.image(remote);break}
+                    catch(cancel:CancellationException) {throw cancel}
+                    catch(error:Exception) {
+                        if(error is SchoolSessionExpired || error is SchoolRateLimited) throw error
+                        failure=error
+                        if(attempt<settings.retryCount) kotlinx.coroutines.delay(300L*attempt)
                     }
                 }
-                pages += pageFile ?: throw failure ?: IllegalStateException("第 ${index + 1} 页下载失败")
-                putTask(task.copy(status = "running",
-                    progress = ((index + 1) * 100 / urls.size),
-                    message = "已下载 ${index + 1} / ${urls.size} 页"))
-                if (settings.requestGapMillis > 0) kotlinx.coroutines.delay(settings.requestGapMillis)
+                coroutineContext.ensureActive()
+                if(source.credentials!=null && auth!=source.credentials) throw CancellationException("学校账号已断开")
+                commitSchoolPage(material.id,remote,bytes ?: throw failure ?: IllegalStateException("页面下载失败"),catalog,legacy)
+                putTask(task.copy(status="running",progress=(index+1)*100/pending.size,message="已补全 ${index+1} / ${pending.size} 页",materialId=material.id))
+                if(settings.requestGapMillis>0) kotlinx.coroutines.delay(settings.requestGapMillis)
             }
-            val material = existing?.copy(pages=pages,schoolEntry=entry,revision=existing.revision+1) ?: StudyMaterial(
-                id = task.id, sourceKey = entry.id, title = entry.title,
-                day = entry.day, courseId = entry.groupId, kind = "images", pages = pages,schoolEntry=entry
-            )
-            store.put(material)
-            savedMaterial = material
-            putTask(task.copy(status = "done", progress = 100, message = "下载完成", materialId = material.id))
-            refreshLibrary()
-        } catch (error: CancellationException) {
-            if (savedMaterial == null) media.removeIncomplete(task.id)
-            putTask(if (savedMaterial != null) task.copy(status = "done", progress = 100,
-                message = "下载完成", materialId = savedMaterial.id)
-            else task.copy(status = "cancelled", message = "已取消"))
-        } catch (error: Exception) {
-            if(error is SchoolSessionExpired) expireSchoolSession(credentials)
-            if (savedMaterial == null) media.removeIncomplete(task.id)
-            putTask(if (savedMaterial != null) task.copy(status = "done", progress = 100,
-                message = "下载完成", materialId = savedMaterial.id)
-            else task.copy(status = "failed", message = error.message ?: "下载失败"))
+            putTask(task.copy(status="done",progress=100,message=if(pending.isEmpty()) "没有新增页面" else "已同步本次可用的 ${catalog.size} 页",materialId=material.id))
+        } catch(cancel:CancellationException) {
+            putTask(task.copy(status="cancelled",message="已取消，已保存页面可继续补全",materialId=materialId));throw cancel
+        } catch(error:Exception) {
+            if(error is SchoolSessionExpired) source.credentials?.let {expireSchoolSession(it)}
+            putTask(task.copy(status="failed",message=error.message ?: "同步失败，已保存页面已保留",materialId=materialId))
         }
     }
 
@@ -669,22 +690,21 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
             return
         }
         if (task.type != "download") return
-        val credentials = auth ?: run { notice("请先重新登录学校平台"); return }
+        val source=createPageSource() ?: run {notice("请先重新登录学校平台");return}
         val entry = runCatching { ScheduleEntry.from(JSONObject(task.payload)) }.getOrNull() ?: return
-        if (!SchoolApi.ownsEntry(credentials, entry)) {
+        if (!source.owns(entry)) {
             notice("请使用获取这份课件时的学校账号登录")
             return
         }
-        if (!queuedSources.add(entry.id)) return
+        if(!releasePausedClassroom(entry) || !queuedSources.add(entry.id)) return
         val job = viewModelScope.launch(Dispatchers.IO, start = CoroutineStart.LAZY) {
             try {
                 putTask(task.copy(status = "queued", progress = 0, message = "等待下载"))
                 downloadSlots.withPermit {
-                        if (auth != credentials) throw CancellationException("学校账号已断开")
-                        downloadTask(task, entry, credentials)
+                        downloadTask(task, entry, source)
                     }
             } catch (_: CancellationException) {
-                putTask(task.copy(status = "cancelled", message = "已取消"))
+                if(state.value.tasks.firstOrNull {it.id==task.id}?.status!="cancelled") putTask(task.copy(status = "cancelled", message = "已取消"))
             } finally {
                 queuedSources.remove(entry.id)
                 jobs.remove(id)

@@ -64,7 +64,8 @@ data class StudyMaterial(
     val deleted: Boolean = false,
     val schoolEntry: ScheduleEntry? = null,
     val pageNotes: Map<Int,String> = emptyMap(),
-    val touched: Long = System.currentTimeMillis()
+    val touched: Long = System.currentTimeMillis(),
+    val remotePageCount: Int? = null
 ) {
     val keptCount get() = pages.size - excluded.size
     val reviewed get() = reviewRevision == revision
@@ -78,7 +79,7 @@ data class StudyMaterial(
         .put("exportRevision", exportRevision).put("exportUri", exportUri)
         .put("lastPage", lastPage).put("readAt", readAt).put("readOffset", readOffset).put("readFraction", readFraction.toDouble())
         .put("bookmarks", JSONArray(bookmarks.sorted())).put("deleted", deleted).put("touched", touched)
-        .put("schoolEntry",schoolEntry?.json())
+        .put("schoolEntry",schoolEntry?.json()).put("remotePageCount",remotePageCount)
         .put("pageNotes",JSONObject().also {obj ->pageNotes.forEach {(page,text) ->obj.put(page.toString(),text)}})
 
     companion object {
@@ -107,6 +108,7 @@ data class StudyMaterial(
                 deleted = value.optBoolean("deleted"),
                 schoolEntry=value.optJSONObject("schoolEntry")?.let {ScheduleEntry.from(it)},
                 pageNotes=value.optJSONObject("pageNotes")?.let {obj ->obj.keys().asSequence().mapNotNull {key ->key.toIntOrNull()?.takeIf {it>0}?.let {it to obj.optString(key).take(2000)}}.toMap()} ?: emptyMap(),
+                remotePageCount=if(value.isNull("remotePageCount")) null else value.optInt("remotePageCount").coerceAtLeast(0),
                 touched = value.optLong("touched")
             )
         }

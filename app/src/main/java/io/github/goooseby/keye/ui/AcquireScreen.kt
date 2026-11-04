@@ -46,8 +46,8 @@ fun AcquireScreen(state: UiState,model: KeyeViewModel,onLogin: () -> Unit,onDown
     var now by remember {mutableLongStateOf(System.currentTimeMillis())}
     LaunchedEffect(Unit) {while(true) {now=System.currentTimeMillis();kotlinx.coroutines.delay(15_000)}}
     val groups=remember(state.schedule) {state.schedule.groupBy(ScheduleEntry::groupId)}
-    fun activeCapture(entry: ScheduleEntry)=state.classroom?.let {it.entry.id==entry.id && it.stage!=ClassroomStage.Ended}==true
-    fun selectable(entry: ScheduleEntry)=!activeCapture(entry) && state.materials.none {it.sourceKey==entry.id && (it.pages.isNotEmpty() || it.deleted)}
+    fun activeCapture(entry: ScheduleEntry)=state.classroom?.let {it.entry.id==entry.id && it.stage in setOf(ClassroomStage.Connecting,ClassroomStage.Connected,ClassroomStage.Waiting,ClassroomStage.Retrying)}==true
+    fun selectable(entry: ScheduleEntry)=!activeCapture(entry) && state.materials.none {it.sourceKey==entry.id && it.deleted}
     LaunchedEffect(state.schedule,state.materials,state.classroom?.entry?.id,state.classroom?.stage) {
         val available=state.schedule.filter {selectable(it)}.map(ScheduleEntry::id).toSet()
         selected=selected.intersect(available)
@@ -121,18 +121,21 @@ fun AcquireScreen(state: UiState,model: KeyeViewModel,onLogin: () -> Unit,onDown
                         }
                     }
                     if(group in expanded) items(entries,key=ScheduleEntry::id){entry ->
-                        val downloaded=state.materials.any {it.sourceKey==entry.id && (it.pages.isNotEmpty() || it.deleted)}
+                        val cached=state.materials.firstOrNull {it.sourceKey==entry.id}
+                        val downloaded=cached?.let {it.pages.isNotEmpty() || it.deleted}==true
                         val checked=entry.id in selected
                         val tone by animateColorAsState(if(checked) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,label="lecture selection")
                         Surface(onClick={if(downloaded) state.materials.firstOrNull{it.sourceKey==entry.id}?.let{if(!it.deleted) onOpen(it.id) else model.notice("课件在回收站中，可在我的中恢复")} else if(activeCapture(entry)) onFollow(entry) else selected=if(checked) selected-entry.id else selected+entry.id},color=tone,modifier=Modifier.animateItem()) {
                             Column {
                                 Row(Modifier.fillMaxWidth().heightIn(min=52.dp).padding(start=24.dp,end=8.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(12.dp)) {
                                     AppIcon("document",modifier=Modifier.size(19.dp))
-                                    Text(runCatching{LocalDate.parse(entry.day).format(DateTimeFormatter.ofPattern("M月d日  EEE",Locale.SIMPLIFIED_CHINESE))}.getOrDefault(entry.day),Modifier.weight(1f),style=MaterialTheme.typography.bodyMedium)
+                                    Column(Modifier.weight(1f).padding(vertical=6.dp)) {
+                                        Text(runCatching{LocalDate.parse(entry.day).format(DateTimeFormatter.ofPattern("M月d日  EEE",Locale.SIMPLIFIED_CHINESE))}.getOrDefault(entry.day),style=MaterialTheme.typography.bodyMedium)
+                                        if(cached!=null && !cached.deleted) Text(if(cached.remotePageCount!=null && cached.pages.size<cached.remotePageCount) "已保存 ${cached.pages.size} / ${cached.remotePageCount} 页 · 待补全" else "已保存 ${cached.pages.size} 页",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
                                     if(entry.isInProgress(now) || activeCapture(entry)) TextButton(onClick={onFollow(entry)},contentPadding=PaddingValues(horizontal=8.dp)) {AppIcon("live",modifier=Modifier.size(17.dp));Spacer(Modifier.width(4.dp));Text(if(entry.isInProgress(now)) "上课中 · 跟看" else "继续跟看",style=MaterialTheme.typography.labelMedium)}
-                                    if(downloaded) Text("打开",Modifier.padding(end=12.dp),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
-                                    else if(activeCapture(entry)) Text("待增页",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
-                                    else Checkbox(checked,{selected=if(it) selected+entry.id else selected-entry.id})
+                                    if(downloaded) IconButton(onClick={if(cached?.deleted==true) model.notice("课件在回收站中，请先恢复") else cached?.let {onOpen(it.id)}}) {AppIcon("document","打开已保存课件",Modifier.size(20.dp))}
+                                    if(!activeCapture(entry)) Checkbox(checked,{selected=if(it) selected+entry.id else selected-entry.id},enabled=selectable(entry),modifier=Modifier.semantics {contentDescription=if(cached!=null) "检查并补全课件" else "选择下载课件"})
                                 }
                                 HorizontalDivider(Modifier.padding(start=55.dp),thickness=.5.dp,color=MaterialTheme.colorScheme.outlineVariant.copy(alpha=.5f))
                             }
@@ -144,7 +147,7 @@ fun AcquireScreen(state: UiState,model: KeyeViewModel,onLogin: () -> Unit,onDown
                 Surface(color=MaterialTheme.colorScheme.surface,shadowElevation=6.dp) {
                     Row(Modifier.fillMaxWidth().padding(horizontal=20.dp,vertical=6.dp),verticalAlignment=Alignment.CenterVertically) {
                         Text("已选 ${selected.size} 节",Modifier.weight(1f),style=MaterialTheme.typography.titleSmall)
-                        Button(onClick={onDownload(state.schedule.filter{it.id in selected});selected=emptySet()},shape=RoundedCornerShape(14.dp),contentPadding=PaddingValues(horizontal=22.dp,vertical=13.dp)) {AppIcon("download",modifier=Modifier.size(18.dp));Spacer(Modifier.width(8.dp));Text("下载课件")}
+                        Button(onClick={onDownload(state.schedule.filter{it.id in selected});selected=emptySet()},shape=RoundedCornerShape(14.dp),contentPadding=PaddingValues(horizontal=22.dp,vertical=13.dp)) {AppIcon("download",modifier=Modifier.size(18.dp));Spacer(Modifier.width(8.dp));Text(if(state.schedule.any {it.id in selected && state.materials.any {m ->m.sourceKey==it.id}}) "检查并补全" else "下载课件")}
                     }
                 }
             }

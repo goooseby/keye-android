@@ -28,13 +28,14 @@ import org.json.JSONObject
 
 /** Debug-only controlled feed. No school cookies, endpoints or user data are used. */
 class ClassroomDemoActivity: ComponentActivity() {
+    private lateinit var model:KeyeViewModel
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState);enableEdgeToEdge()
         if(savedInstanceState==null || !DemoClassroomFeed.initialized) DemoClassroomFeed.reset(application,intent.getIntExtra("pages",2))
         val factory=object: ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST") override fun <T:ViewModel> create(modelClass: Class<T>): T=KeyeViewModel(application) {DemoClassroomFeed} as T
         }
-        val model=ViewModelProvider(this,factory)[KeyeViewModel::class.java]
+        model=ViewModelProvider(this,factory)[KeyeViewModel::class.java]
         if(model.state.value.classroom==null) model.startClassroom(DemoClassroomFeed.entry)
         setContent {KeyeTheme {
             val state by model.state.collectAsState()
@@ -45,6 +46,12 @@ class ClassroomDemoActivity: ComponentActivity() {
         super.onNewIntent(intent);setIntent(intent)
         if(intent.hasExtra("pages")) DemoClassroomFeed.total=intent.getIntExtra("pages",2).coerceIn(0,20)
         if(intent.hasExtra("offline")) DemoClassroomFeed.offline=intent.getBooleanExtra("offline",false)
+        when(intent.getStringExtra("command")) {
+            "sync" ->{model.endClassroom();model.download(listOf(DemoClassroomFeed.entry))}
+            "resume" ->model.startClassroom(DemoClassroomFeed.entry)
+            "pause" ->model.pauseClassroom()
+            "end" ->model.endClassroom()
+        }
     }
 }
 
@@ -75,7 +82,7 @@ private object DemoClassroomFeed: ClassroomPageSource {
         return (1..total).map {n ->val url="https://classroom-test.invalid/${entry.id}/page-$n.png";ClassroomPage(classroomPageKey(url),url)}
     }
     override fun image(page: ClassroomPage): ByteArray {
-        record("image") {if(offline) throw java.io.IOException("演示网络暂不可用")}
+        record("image:"+page.url.substringAfterLast("page-").substringBefore('.')) {if(offline) throw java.io.IOException("演示网络暂不可用")}
         val number=page.url.substringAfterLast("page-").substringBefore('.').toInt()
         val bitmap=Bitmap.createBitmap(1280,720,Bitmap.Config.ARGB_8888)
         val canvas=Canvas(bitmap);canvas.drawColor(Color.WHITE)

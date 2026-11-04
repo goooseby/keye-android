@@ -2,6 +2,7 @@ package io.github.goooseby.keye
 
 import io.github.goooseby.keye.data.PageFile
 import io.github.goooseby.keye.data.StudyMaterial
+import io.github.goooseby.keye.domain.insertClassroomPage
 import io.github.goooseby.keye.domain.ClassroomPage
 import io.github.goooseby.keye.domain.classroomAppendTarget
 import io.github.goooseby.keye.domain.classroomPageKey
@@ -48,4 +49,20 @@ class ClassroomPolicyTest {
         assertEquals(2,grown.pages.size)
         assertEquals(setOf(1),selectExportPages(listOf(grown),setOf(1))[grown.id])
     }
+    @Test fun partialLiveCaptureCanBeBackfilledWithoutLosingPageBoundData() {
+        val catalog=(1..6).map {ClassroomPage("$it","url-$it")}
+        var partial=StudyMaterial(sourceKey="lesson",title="lesson",day="day",kind="images",
+            pages=listOf(PageFile("5","5",remoteKey="5"),PageFile("6","6",remoteKey="6")),
+            remotePageCount=6,pageNotes=mapOf(1 to "note on five"),bookmarks=setOf(2),excluded=setOf(1),lastPage=2)
+        val missing=pendingClassroomPages(partial.pages.mapNotNull {it.remoteKey}.toSet(),catalog)
+        assertEquals(listOf("1","2","3","4"),missing.map {it.key})
+        for(remote in missing) partial=insertClassroomPage(partial,PageFile(remote.key,remote.key,remoteKey=remote.key),catalog)
+        assertEquals((1..6).map {"$it"},partial.pages.map {it.source})
+        assertEquals(mapOf(5 to "note on five"),partial.pageNotes)
+        assertEquals(setOf(6),partial.bookmarks);assertEquals(setOf(5),partial.excluded)
+        assertEquals(6,partial.lastPage);assertEquals(6,partial.remotePageCount)
+        assertTrue(pendingClassroomPages(partial.pages.mapNotNull {it.remoteKey}.toSet(),catalog).isEmpty())
+        assertEquals(listOf("7"),pendingClassroomPages(partial.pages.mapNotNull {it.remoteKey}.toSet(),catalog+ClassroomPage("7","url-7")).map {it.key})
+    }
+
 }
