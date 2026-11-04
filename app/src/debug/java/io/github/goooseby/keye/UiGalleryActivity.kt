@@ -20,6 +20,8 @@ import io.github.goooseby.keye.ui.CourseScreen
 import io.github.goooseby.keye.ui.LibraryScreen
 import io.github.goooseby.keye.ui.SettingsScreen
 import io.github.goooseby.keye.ui.TasksScreen
+import io.github.goooseby.keye.ui.TimetableScreen
+import io.github.goooseby.keye.network.SchoolConnection
 import io.github.goooseby.keye.ui.components.AppIcon
 import io.github.goooseby.keye.ui.components.KeyeTheme
 import io.github.goooseby.keye.ui.reader.ReaderScreen
@@ -33,6 +35,20 @@ class UiGalleryActivity: ComponentActivity() {
         setContent {KeyeTheme {
             val model: KeyeViewModel=viewModel()
             val actual by model.state.collectAsState()
+            if(page=="offline-timetable") {
+                // Real persisted data, deliberately without authenticating or changing WebView cookies.
+                var opened by remember {mutableStateOf<String?>(null)}
+                androidx.activity.compose.BackHandler(opened!=null) {opened=null}
+                Scaffold(topBar={Text("离线课表检查",Modifier.statusBarsPadding().padding(20.dp),style=MaterialTheme.typography.titleLarge)}) {padding ->
+                    Box(Modifier.fillMaxSize().padding(padding)) {
+                        val material=actual.materials.firstOrNull {it.id==opened}
+                        if(material!=null) ReaderScreen(material,model,{File(filesDir,it)},{opened=null},{},{},null)
+                        else TimetableScreen(actual.copy(schoolConnection=SchoolConnection.Expired),model,{},
+                            {entry ->opened=actual.materials.firstOrNull {it.sourceKey==entry.id && !it.deleted && it.pages.isNotEmpty()}?.id},{})
+                    }
+                }
+                return@KeyeTheme
+            }
             val courses=listOf(Course("visual-math","高等数学","2026 秋季"),Course("visual-net","计算机网络","2026 秋季"),Course("visual-algo","数据结构与算法","专业课程"),Course("visual-english","大学英语","通识课程"))
             val names=listOf("第三章 · 微分与导数","第二章 · 网络体系结构","线性表与链式存储")
             val requested=intent.getStringExtra("material")

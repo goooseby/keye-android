@@ -20,7 +20,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalDensity
@@ -35,6 +34,7 @@ import io.github.goooseby.keye.KeyeViewModel
 import io.github.goooseby.keye.UiState
 import io.github.goooseby.keye.data.Course
 import io.github.goooseby.keye.data.StudyMaterial
+import io.github.goooseby.keye.data.ScheduleEntry
 import io.github.goooseby.keye.ui.components.AppIcon
 import io.github.goooseby.keye.ui.components.EmptyState
 import io.github.goooseby.keye.ui.components.IconBadge
@@ -44,9 +44,11 @@ import io.github.goooseby.keye.ui.components.SearchField
 import io.github.goooseby.keye.ui.components.SheetHeading
 import java.io.File
 import kotlinx.coroutines.delay
+import io.github.goooseby.keye.domain.scheduleIsFresh
+import io.github.goooseby.keye.domain.schoolToday
 
 @Composable
-private fun courseTone(key: String): Pair<Color, Color> {
+internal fun courseTone(key: String): Pair<Color, Color> {
     if(isSystemInDarkTheme()) return when(key.hashCode().mod(4)) {
         0 -> Color(0xFF203C4B) to Color(0xFF8ED8FF)
         1 -> Color(0xFF352C4A) to Color(0xFFCEBAFF)
@@ -64,7 +66,10 @@ private fun courseTone(key: String): Pair<Color, Color> {
 @Composable
 fun LibraryScreen(state: UiState, onCourse: (String?) -> Unit, onMaterial: (String) -> Unit,
     onImport: () -> Unit, onExport: (String, String) -> Unit, onBatchExport: (List<String>, String) -> Unit,
-    mediaPath: (String) -> File, model: KeyeViewModel, initialTab: Int=1) {
+    mediaPath: (String) -> File, model: KeyeViewModel, initialTab: Int=1,onFollow: (ScheduleEntry)->Unit={},onTimetable: ()->Unit={}) {
+    var liveNow by remember {mutableLongStateOf(System.currentTimeMillis())}
+    LaunchedEffect(Unit) {while(true) {liveNow=System.currentTimeMillis();delay(15_000)}}
+    val hasLive=state.loggedIn && !state.timetable.fromCache && state.timetable.error==null && scheduleIsFresh(state.timetable.checkedAt,liveNow) && state.timetable.entries.any {it.status==1 && it.day==schoolToday().toString()}
     var search by rememberSaveable { mutableStateOf("") }
     var tab by rememberSaveable(initialTab) { mutableIntStateOf(initialTab) }
     var newCourse by remember { mutableStateOf(false) }
@@ -85,13 +90,15 @@ fun LibraryScreen(state: UiState, onCourse: (String?) -> Unit, onMaterial: (Stri
                 } else PillTabs(if(tab==2) listOf("最近阅读","全部课程","回收站") else listOf("最近阅读","全部课程"), if(tab==0) 1 else if(tab==1) 0 else 2, {tab=if(it==0) 1 else if(it==1) 0 else 2;search=""}, Modifier.padding(horizontal=20.dp, vertical=4.dp))
             }
             LazyVerticalGrid(columns=if(largeType) GridCells.Fixed(1) else GridCells.Adaptive(148.dp), modifier=Modifier.weight(1f),
-                contentPadding=PaddingValues(start=20.dp,end=20.dp,top=16.dp,bottom=112.dp),
-                horizontalArrangement=Arrangement.spacedBy(12.dp), verticalArrangement=Arrangement.spacedBy(12.dp)) {
+                contentPadding=PaddingValues(start=20.dp,end=20.dp,top=12.dp,bottom=if(tab==0 && selected.isEmpty()) 24.dp else 100.dp),
+                horizontalArrangement=Arrangement.spacedBy(10.dp), verticalArrangement=Arrangement.spacedBy(10.dp)) {
+                if(hasLive && tab!=2 && search.isBlank() && selected.isEmpty()) item(span={GridItemSpan(maxLineSpan)},key="live") {LiveQuickEntry(state,onFollow,onTimetable)}
                 item(span={GridItemSpan(maxLineSpan)}, key="search") { SearchField(search,{search=it},if(tab==0) "搜索课程" else "搜索课件或备注") }
                 if(tab==0) {
                     item(span={GridItemSpan(maxLineSpan)}, key="courses heading") {
                         Row(Modifier.fillMaxWidth(), verticalAlignment=Alignment.CenterVertically) {
                             Text("课程 · ${state.courses.size}",Modifier.weight(1f),style=MaterialTheme.typography.labelLarge,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                            TextButton(onClick=onImport) {Text("导入")}
                             TextButton(onClick={newCourse=true}) {AppIcon("add",modifier=Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text("新建")}
                         }
                     }
@@ -123,7 +130,7 @@ fun LibraryScreen(state: UiState, onCourse: (String?) -> Unit, onMaterial: (Stri
                 }
             }
         }
-        AnimatedVisibility(selected.isEmpty() && tab!=2,modifier=Modifier.align(Alignment.BottomEnd).padding(20.dp),enter=fadeIn()+scaleIn(),exit=fadeOut()+scaleOut()) {
+        AnimatedVisibility(selected.isEmpty() && tab==1,modifier=Modifier.align(Alignment.BottomEnd).padding(20.dp),enter=fadeIn()+scaleIn(),exit=fadeOut()+scaleOut()) {
             ExtendedFloatingActionButton(onClick=onImport,icon={AppIcon("add")},text={Text("导入")},
                 containerColor=MaterialTheme.colorScheme.primary,contentColor=MaterialTheme.colorScheme.onPrimary,
                 shape=RoundedCornerShape(20.dp),elevation=FloatingActionButtonDefaults.elevation(4.dp,6.dp))
@@ -141,28 +148,24 @@ fun LibraryScreen(state: UiState, onCourse: (String?) -> Unit, onMaterial: (Stri
 @Composable
 private fun CourseTile(course: Course,count: Int,modifier: Modifier=Modifier,wide: Boolean=false,onClick: () -> Unit) {
     val (background,accent)=courseTone(course.id)
-    Surface(onClick=onClick,modifier=modifier.fillMaxWidth(),shape=RoundedCornerShape(22.dp),color=background) {
-        if(wide) Row(Modifier.fillMaxWidth().padding(22.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(18.dp)) {
-            IconBadge("library",Modifier.size(54.dp),accent,Color.White.copy(alpha=if(isSystemInDarkTheme()) .08f else .7f))
-            Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(6.dp)) {
+    Surface(onClick=onClick,modifier=modifier.fillMaxWidth(),shape=RoundedCornerShape(20.dp),color=background,border=BorderStroke(.7.dp,accent.copy(alpha=.12f))) {
+        if(wide) Row(Modifier.fillMaxWidth().padding(16.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(12.dp)) {
+            IconBadge("library",Modifier.size(40.dp),accent,Color.White.copy(alpha=if(isSystemInDarkTheme()) .08f else .7f))
+            Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(4.dp)) {
                 Text(course.title,style=MaterialTheme.typography.titleMedium,fontWeight=FontWeight.SemiBold,maxLines=2,overflow=TextOverflow.Ellipsis)
                 Text(if(course.term.isBlank()) "$count 份课件" else "${course.term} · $count 份",style=MaterialTheme.typography.bodySmall,color=accent)
             }
-            CompositionLocalProvider(LocalContentColor provides accent){AppIcon("next",modifier=Modifier.size(18.dp))}
-        } else Box(Modifier.heightIn(min=174.dp)) {
-            Canvas(Modifier.matchParentSize().clip(RoundedCornerShape(22.dp))) {
-                drawCircle(accent.copy(alpha=.055f),size.width*.65f,Offset(size.width*1.05f,size.height*.95f))
-                drawCircle(accent.copy(alpha=.06f),size.width*.5f,Offset(size.width*1.05f,size.height*.95f),style=androidx.compose.ui.graphics.drawscope.Stroke(1.dp.toPx()))
+            CompositionLocalProvider(LocalContentColor provides accent){AppIcon("next",modifier=Modifier.size(16.dp))}
+        } else Column(Modifier.heightIn(min=144.dp).padding(14.dp),verticalArrangement=Arrangement.SpaceBetween) {
+            Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
+                IconBadge("library",Modifier.size(32.dp),accent,Color.White.copy(alpha=if(isSystemInDarkTheme()) .08f else .7f))
+                Spacer(Modifier.weight(1f))
+                CompositionLocalProvider(LocalContentColor provides accent.copy(alpha=.7f)){AppIcon("next",modifier=Modifier.size(16.dp))}
             }
-            Column(Modifier.padding(18.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-                Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
-                    IconBadge("library",Modifier.size(38.dp),accent,Color.White.copy(alpha=if(isSystemInDarkTheme()) .08f else .7f))
-                    Spacer(Modifier.weight(1f))
-                    CompositionLocalProvider(LocalContentColor provides accent.copy(alpha=.7f)){AppIcon("next",modifier=Modifier.size(16.dp))}
-                }
-                Spacer(Modifier.height(8.dp))
-                Text(course.title,style=MaterialTheme.typography.titleMedium,fontWeight=FontWeight.SemiBold,maxLines=2,overflow=TextOverflow.Ellipsis)
-                Text(if(course.term.isBlank()) "$count 份课件" else "${course.term} · $count 份",style=MaterialTheme.typography.bodySmall,color=accent,maxLines=1,overflow=TextOverflow.Ellipsis)
+            Spacer(Modifier.height(10.dp))
+            Column(verticalArrangement=Arrangement.spacedBy(4.dp)) {
+                Text(course.title,Modifier.heightIn(min=38.dp),style=MaterialTheme.typography.titleSmall,fontWeight=FontWeight.SemiBold,maxLines=2,overflow=TextOverflow.Ellipsis)
+                Text(if(course.term.isBlank()) "$count 份课件" else "${course.term} · $count 份",style=MaterialTheme.typography.labelMedium,color=accent,maxLines=1,overflow=TextOverflow.Ellipsis)
             }
         }
     }

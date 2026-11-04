@@ -19,7 +19,8 @@ data class SchoolAuth(
     val cookie: String,
     val jwt: String,
     val userId: String,
-    val tenantId: String
+    val tenantId: String,
+    val isAdmin: Boolean = false
 )
 
 class SchoolRateLimited(val retryAfterSeconds: Long): IllegalStateException("平台请求频率受限，稍后自动继续")
@@ -47,7 +48,7 @@ class SchoolApi {
                 val userId = user.optString("id")
                 val tenantId = user.optString("tenant_id")
                 if (userId.isBlank() || tenantId.isBlank()) null
-                else SchoolAuth(cookieHeader, jwt, userId, tenantId)
+                else SchoolAuth(cookieHeader, jwt, userId, tenantId, user.optJSONArray("roles")?.let {roles ->(0 until roles.length()).any {roles.optJSONObject(it)?.optString("code")=="admin"}}==true)
             } catch (_: Exception) {
                 null
             }
@@ -185,13 +186,16 @@ class SchoolApi {
                         title = course.optString("course_title", "未命名课程"),
                         day = date, courseId = courseId, subId = subId,
                         startsAt = scheduleTimestamp(course.optString("start_at")),
-                        endsAt = scheduleTimestamp(course.optString("end_at"))
+                        endsAt = scheduleTimestamp(course.optString("end_at")),
+                        status = course.optString("status").toIntOrNull(),statusLabel=course.optString("status_label"),
+                        teacher=course.optString("teacher_name").ifBlank {course.optString("lecturer_name")},room=course.optString("room_name"),
+                        reviewType=course.optString("sub_review_type").toIntOrNull()
                     )
                 }
             }
             day = last.plusDays(1)
         }
-        return result.sortedBy(ScheduleEntry::day)
+        return result.filter {io.github.goooseby.keye.domain.schoolLessonVisible(it,auth.isAdmin)}.sortedWith(compareBy(ScheduleEntry::day,{it.startsAt ?: Long.MAX_VALUE}))
     }
 
     fun imageUrls(auth: SchoolAuth, entry: ScheduleEntry, timeoutSeconds: Int): List<String> =

@@ -84,4 +84,15 @@ class LibraryStore private constructor(context: Context) : SQLiteOpenHelper(cont
             arrayOf(settings.json().toString())
         )
     }
+    fun scheduleWeek(account: String,week: String): CachedSchedule? =
+        readableDatabase.rawQuery("SELECT value FROM settings WHERE key=?",arrayOf("schedule:$account:$week")).use {cursor ->
+            if(cursor.moveToFirst()) runCatching {CachedSchedule.from(JSONObject(cursor.getString(0)))}.getOrNull() else null
+        }
+
+    fun hasScheduleWeeks(account: String): Boolean = readableDatabase.rawQuery("SELECT 1 FROM settings WHERE key LIKE ? LIMIT 1",arrayOf("schedule:$account:%")).use {it.moveToFirst()}
+
+    fun putScheduleWeek(account: String,week: String,schedule: CachedSchedule) {
+        writableDatabase.execSQL("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)",arrayOf("schedule:$account:$week",schedule.json().toString()))
+    }
+
 }

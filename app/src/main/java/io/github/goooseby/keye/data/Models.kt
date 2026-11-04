@@ -123,16 +123,24 @@ data class ScheduleEntry(
     val courseId: String,
     val subId: String,
     val startsAt: Long? = null,
-    val endsAt: Long? = null
+    val endsAt: Long? = null,
+    val status: Int? = null,
+    val statusLabel: String = "",
+    val teacher: String = "",
+    val room: String = "",
+    val reviewType: Int? = null
 ) {
     fun json() = JSONObject().put("id", id).put("groupId", groupId).put("title", title)
         .put("day", day).put("courseId", courseId).put("subId", subId).put("startsAt",startsAt).put("endsAt",endsAt)
+        .put("status",status).put("statusLabel",statusLabel).put("teacher",teacher).put("room",room).put("reviewType",reviewType)
     companion object {
         fun from(value: JSONObject) = ScheduleEntry(
             value.getString("id"), value.getString("groupId"), value.getString("title"),
             value.getString("day"), value.getString("courseId"), value.getString("subId"),
             if(value.isNull("startsAt")) null else value.getLong("startsAt"),
-            if(value.isNull("endsAt")) null else value.getLong("endsAt")
+            if(value.isNull("endsAt")) null else value.getLong("endsAt"),
+            value.textOrNull("status")?.toIntOrNull(),value.optString("statusLabel"),
+            value.optString("teacher"),value.optString("room"),value.textOrNull("reviewType")?.toIntOrNull()
         )
     }
 }
@@ -189,4 +197,15 @@ val taskQueueOrder: Comparator<TaskRecord> = compareByDescending<TaskRecord> {it
 fun mergeTaskBatch(existing: List<TaskRecord>,incoming: List<TaskRecord>): List<TaskRecord> {
     val replacements=incoming.associateBy {it.id}
     return (existing.filterNot {it.id in replacements}+replacements.values).sortedWith(taskQueueOrder)
+}
+
+/** Account-scoped week cache; only normalized lesson metadata is persisted. */
+data class CachedSchedule(val entries: List<ScheduleEntry>,val checkedAt: Long) {
+    fun json()=JSONObject().put("checkedAt",checkedAt).put("entries",JSONArray().also {array ->entries.forEach {array.put(it.json())}})
+    companion object {
+        fun from(value: JSONObject): CachedSchedule {
+            val rows=value.getJSONArray("entries")
+            return CachedSchedule((0 until rows.length()).map {ScheduleEntry.from(rows.getJSONObject(it))},value.getLong("checkedAt"))
+        }
+    }
 }

@@ -1,5 +1,9 @@
 package io.github.goooseby.keye
 
+import io.github.goooseby.keye.data.CachedSchedule
+import io.github.goooseby.keye.domain.schoolToday
+import io.github.goooseby.keye.domain.schoolWeek
+import io.github.goooseby.keye.domain.scheduleIsFresh
 import android.app.Application
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
@@ -59,9 +63,19 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.async
+import kotlinx.coroutines.Deferred
+import io.github.goooseby.keye.domain.shouldRefreshScheduleWeek
 import org.json.JSONObject
 
+data class TimetableState(
+    val week: String=schoolWeek(schoolToday()).toString(),val entries: List<ScheduleEntry> = emptyList(),
+    val loading: Boolean=false,val checkedAt: Long=0,val error: String?=null,val fromCache: Boolean=true
+)
+
 data class UiState(
+    val timetable: TimetableState = TimetableState(),
+    val hasTimetableCache: Boolean = false,
     val exportState: ExportState? = null,
     val classroom: ClassroomSession? = null,
     val loading: Boolean = true,
@@ -70,6 +84,7 @@ data class UiState(
     val materials: List<StudyMaterial> = emptyList(),
     val tasks: List<TaskRecord> = emptyList(),
     val schedule: List<ScheduleEntry> = emptyList(),
+    val scheduleCheckedAt: Long=0,
     val settings: AppSettings = AppSettings(),
     val loggedIn: Boolean = false,
     val schoolConnection: SchoolConnection = SchoolConnection.SignedOut,
@@ -86,8 +101,21 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
     @Volatile private var auth: SchoolAuth? = null
     private var sessionJob: Job? = null
     private val sessionSequence=java.util.concurrent.atomic.AtomicLong()
-    private var lastSessionCheck=0L
+    @Volatile private var lastSessionCheck=0L
     @Volatile private var rejectedCookie:String?=null
+    private val timetablePrefs=application.getSharedPreferences("timetable",0)
+    @Volatile private var timetableAccount:String?=timetablePrefs.getString("last_account",null)
+    private data class WeekRequest(val credentials:SchoolAuth,val result:Deferred<CachedSchedule>)
+    private val weekRequests=ConcurrentHashMap<String,WeekRequest>()
+    private val verifiedWeeks=ConcurrentHashMap.newKeySet<String>()
+    private val weekMemory=ConcurrentHashMap<String,CachedSchedule>()
+    private val weekRequestLock=Any()
+    private val weekSlots=Semaphore(2)
+    private var timetablePrefetch:Job?=null
+    private var prefetchAnchor:String?=null
+    @Volatile private var schoolForeground=true
+    private var timetableJob: Job?=null
+    private val timetableSequence=java.util.concurrent.atomic.AtomicLong()
     private var scanJob: Job? = null
     private val scanSequence = java.util.concurrent.atomic.AtomicLong()
     private val jobs = ConcurrentHashMap<String, Job>()
@@ -115,7 +143,14 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
                 val courses = store.courses()
                 val materials = store.materials()
                 val settings = store.settings()
-                mutableState.update { it.copy(loading=false,courses=courses,materials=materials,tasks=interrupted,settings=settings) }
+                val account=timetableAccount
+                val week=schoolWeek(schoolToday()).toString()
+                val cached=account?.let {store.scheduleWeek(it,week)}
+                if(cached!=null) weekMemory["$account:$week"]=cached
+                val hasCache=account?.let {store.hasScheduleWeeks(it)}==true
+                mutableState.update { it.copy(loading=false,courses=courses,materials=materials,tasks=interrupted,settings=settings,
+                    hasTimetableCache=it.hasTimetableCache || (account==timetableAccount && hasCache),
+                    timetable=if(it.timetable.checkedAt==0L && it.timetable.week==week && cached!=null && account==timetableAccount) TimetableState(week,cached.entries,it.timetable.loading,cached.checkedAt) else it.timetable) }
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
@@ -172,16 +207,18 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
         return try {
             withContext(Dispatchers.IO) {school.verifySession(credentials,state.value.settings.timeoutSeconds.coerceAtMost(15))}
             if(sequence!=sessionSequence.get()) return false
+            activateTimetableAccount(credentials)
             auth=credentials;rejectedCookie=null
             lastSessionCheck=android.os.SystemClock.elapsedRealtime()
             android.webkit.CookieManager.getInstance().flush()
             mutableState.update {it.copy(loggedIn=true,schoolConnection=SchoolConnection.Connected,notice=if(silent) null else "已连接学校课堂平台")}
+            loadTimetableWeek(schoolWeek(schoolToday()).toString())
             true
         } catch(error: CancellationException) {throw error}
         catch(error: Exception) {
             if(sequence==sessionSequence.get()) {
                 if(error is SchoolSessionExpired) {
-                    rejectedCookie=credentials.cookie;auth=null
+                    rejectedCookie=credentials.cookie;clearTimetable();auth=null
                     mutableState.update {it.copy(loggedIn=false,schoolConnection=SchoolConnection.Expired,schedule=emptyList(),busy=false)}
                 } else mutableState.update {it.copy(schoolConnection=SchoolConnection.Unverified)}
                 if(!silent) notice(error.message ?: "暂时无法验证登录，请稍后重试")
@@ -195,7 +232,7 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
         val credentials=SchoolApi.authFromCookies(cookie)
         if(credentials==null) {
             if(auth!=null || hasSchoolLoginCookie(cookie)) {
-                auth=null
+                clearTimetable();auth=null
                 mutableState.update {it.copy(loggedIn=false,schoolConnection=SchoolConnection.Expired,schedule=emptyList(),busy=false)}
             }
             return
@@ -203,10 +240,13 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
         if(credentials.cookie==rejectedCookie) return
         if(!force && credentials==auth && android.os.SystemClock.elapsedRealtime()-lastSessionCheck<60_000) return
         val sequence=sessionSequence.incrementAndGet()
+        val warmSchedule=auth==null
+        activateTimetableAccount(credentials)
         auth=credentials
         lastSessionCheck=android.os.SystemClock.elapsedRealtime()
         mutableState.update {it.copy(loggedIn=true,schoolConnection=
             if(it.schoolConnection in setOf(SchoolConnection.Connected,SchoolConnection.Unverified)) it.schoolConnection else SchoolConnection.Checking)}
+        if(warmSchedule) loadTimetableWeek(schoolWeek(schoolToday()).toString())
         sessionJob=viewModelScope.launch {
             try {
                 withContext(Dispatchers.IO) {school.verifySession(credentials,state.value.settings.timeoutSeconds.coerceAtMost(15))}
@@ -224,13 +264,139 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
     private fun expireSchoolSession(credentials: SchoolAuth) {
         if(auth!=credentials) return
         sessionSequence.incrementAndGet()
-        rejectedCookie=credentials.cookie;auth=null
+        rejectedCookie=credentials.cookie;clearTimetable();auth=null
         mutableState.update {it.copy(loggedIn=false,schoolConnection=SchoolConnection.Expired,busy=false,schedule=emptyList(),notice="学校登录已失效，请重新登录")}
         // CookieManager is intentionally untouched: only an explicit sign-out
         // removes cookies, so the school login page may still reuse its SSO.
     }
 
+    private fun clearTimetable() {
+        timetableSequence.incrementAndGet();timetableJob?.cancel();timetablePrefetch?.cancel()
+        weekRequests.values.forEach {it.result.cancel()};weekRequests.clear();verifiedWeeks.clear();prefetchAnchor=null
+        // Session expiry never deletes the locally saved timetable.
+        mutableState.update {it.copy(timetable=it.timetable.copy(loading=false,fromCache=true,error=null))}
+    }
+
+    private fun activateTimetableAccount(credentials: SchoolAuth) {
+        val account=java.security.MessageDigest.getInstance("SHA-256").digest("${credentials.tenantId}:${credentials.userId}".toByteArray()).joinToString("") {"%02x".format(it.toInt() and 255)}
+        if(account!=timetableAccount) {
+            clearTimetable();weekMemory.clear();timetableAccount=account
+            timetablePrefs.edit().putString("last_account",account).apply()
+            mutableState.update {it.copy(timetable=TimetableState(week=it.timetable.week),hasTimetableCache=false)}
+        }
+    }
+
+    private fun fetchScheduleWeek(credentials: SchoolAuth,account: String,start: LocalDate): Deferred<CachedSchedule> = synchronized(weekRequestLock) {
+        val key="$account:$start"
+        weekRequests[key]?.let {if(it.credentials==credentials && it.result.isActive) return@synchronized it.result else it.result.cancel()}
+        val deferred=viewModelScope.async(Dispatchers.IO,start=CoroutineStart.LAZY) {
+            try {
+                val entries=weekSlots.withPermit {school.scan(credentials,start,start.plusDays(6),state.value.settings.timeoutSeconds.coerceAtMost(15))}
+                coroutineContext.ensureActive()
+                if(auth!=credentials || timetableAccount!=account) throw CancellationException("学校账号已变化")
+                val result=CachedSchedule(entries,System.currentTimeMillis())
+                store.putScheduleWeek(account,start.toString(),result);weekMemory[key]=result
+                if(auth!=credentials || timetableAccount!=account) throw CancellationException("学校账号已变化")
+                verifiedWeeks.add(key)
+                lastSessionCheck=android.os.SystemClock.elapsedRealtime()
+                mutableState.update {if(auth==credentials && timetableAccount==account) it.copy(hasTimetableCache=true,schoolConnection=SchoolConnection.Connected) else it}
+                result
+            } catch(error:Exception) {
+                if(auth!=credentials) throw CancellationException("学校账号已变化")
+                throw error
+            }
+        }
+        val request=WeekRequest(credentials,deferred);weekRequests[key]=request
+        deferred.invokeOnCompletion {weekRequests.remove(key,request)}
+        deferred.start();deferred
+    }
+
+    private fun prefetchSchedule(credentials: SchoolAuth,account: String,week: LocalDate,direction:Int=0) {
+        if(!schoolForeground) return
+        val anchor="$account:$week:$direction"
+        synchronized(weekRequestLock) {
+            if(prefetchAnchor==anchor) return
+            prefetchAnchor=anchor
+            timetablePrefetch?.cancel()
+            timetablePrefetch=viewModelScope.launch(Dispatchers.IO) {
+                val offsets=when {direction<0 ->listOf(-1L,-2L,1L);direction>0 ->listOf(1L,2L,-1L);else ->listOf(-1L,1L)}
+                for(offset in offsets) {
+                    if(!schoolForeground || auth!=credentials || timetableAccount!=account) break
+                    val target=week.plusWeeks(offset);val key="$account:$target"
+                    val cached=weekMemory[key] ?: store.scheduleWeek(account,target.toString())?.also {weekMemory[key]=it}
+                    if(cached!=null && !shouldRefreshScheduleWeek(target,cached.checkedAt)) continue
+                    try {fetchScheduleWeek(credentials,account,target).await()}
+                    catch(cancel:CancellationException) {throw cancel}
+                    catch(error:Exception) {if(error is SchoolSessionExpired) {expireSchoolSession(credentials);break}}
+                    kotlinx.coroutines.delay(300)
+                }
+            }
+        }
+    }
+
+    fun loadTimetableWeek(date: String=state.value.timetable.week,force: Boolean=false) {
+        val start=runCatching {schoolWeek(LocalDate.parse(date))}.getOrElse {return}
+        val account=timetableAccount ?: return
+        val credentials=auth
+        val week=start.toString();val key="$account:$week"
+        val current=state.value.timetable
+        val direction=week.compareTo(current.week).coerceIn(-1,1)
+        if(current.week==week && timetableJob?.isActive==true && !force) return
+        val memory=weekMemory[key]
+        val needsNetwork=credentials!=null && (force || memory==null || shouldRefreshScheduleWeek(start,memory.checkedAt) || (start==schoolWeek(schoolToday()) && key !in verifiedWeeks))
+        // Even a cache hit changes the visible week: an older awaited request
+        // may still finish and must not replace the user's newer selection.
+        val sequence=timetableSequence.incrementAndGet();timetableJob?.cancel()
+        if(memory!=null && !needsNetwork) {
+            mutableState.update {it.copy(hasTimetableCache=true,timetable=TimetableState(week,memory.entries,false,memory.checkedAt,fromCache=credentials==null || key !in verifiedWeeks))}
+            if(credentials!=null) prefetchSchedule(credentials,account,start,direction)
+            return
+        }
+        mutableState.update {it.copy(timetable=when {
+            memory!=null ->TimetableState(week,memory.entries,needsNetwork,memory.checkedAt,fromCache=credentials==null || key !in verifiedWeeks)
+            it.timetable.week==week ->it.timetable.copy(loading=credentials!=null,error=null)
+            else ->TimetableState(week=week,loading=credentials!=null)
+        })}
+        timetableJob=viewModelScope.launch(Dispatchers.IO) {
+            fun valid()=sequence==timetableSequence.get() && timetableAccount==account
+            try {
+                val cached=memory ?: store.scheduleWeek(account,week)?.also {weekMemory[key]=it}
+                if(valid() && cached!=null) mutableState.update {it.copy(hasTimetableCache=true,timetable=TimetableState(week,cached.entries,credentials!=null,cached.checkedAt,fromCache=credentials==null || key !in verifiedWeeks))}
+                if(credentials==null || auth!=credentials) return@launch
+                if(!force && cached!=null && !shouldRefreshScheduleWeek(start,cached.checkedAt) && (start!=schoolWeek(schoolToday()) || key in verifiedWeeks)) {
+                    prefetchSchedule(credentials,account,start,direction)
+                    return@launch
+                }
+                val result=fetchScheduleWeek(credentials,account,start).await()
+                if(valid() && auth==credentials) {
+                    mutableState.update {it.copy(timetable=TimetableState(week,result.entries,false,result.checkedAt,fromCache=false))}
+                    prefetchSchedule(credentials,account,start,direction)
+                }
+            } catch(cancel:CancellationException) {throw cancel}
+            catch(error:Exception) {
+                if(valid()) {
+                    if(error is SchoolSessionExpired && credentials!=null) expireSchoolSession(credentials)
+                    else mutableState.update {it.copy(timetable=it.timetable.copy(loading=false,fromCache=true,error="暂时无法更新，显示已保存课表"))}
+                }
+            } finally {if(valid()) mutableState.update {it.copy(timetable=it.timetable.copy(loading=false))}}
+        }
+    }
+
+    fun setSchoolForeground(value: Boolean) {
+        schoolForeground=value
+        if(!value) {timetablePrefetch?.cancel();prefetchAnchor=null}
+    }
+
+    fun taskForLesson(id: String): TaskRecord?=state.value.tasks.firstOrNull {
+        it.type=="download" && runCatching {JSONObject(it.payload).optString("id")==id}.getOrDefault(false)
+    }
+
+    fun isLiveLesson(entry: ScheduleEntry): Boolean = state.value.loggedIn && state.value.schoolConnection==SchoolConnection.Connected && !state.value.timetable.fromCache && entry.status==1 &&
+        state.value.timetable.error==null && scheduleIsFresh(state.value.timetable.checkedAt) &&
+        state.value.timetable.entries.any {it.id==entry.id && it.status==1}
+
     fun logout() {
+        clearTimetable()
         sessionSequence.incrementAndGet();sessionJob?.cancel()
         scanSequence.incrementAndGet();scanJob?.cancel()
         state.value.tasks.filter {it.type=="download"}.forEach {jobs[it.id]?.cancel()}
@@ -256,7 +422,7 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
                 entries.distinctBy(ScheduleEntry::groupId).filter { it.groupId !in known }
                     .forEach { store.put(Course(id = it.groupId, title = it.title)) }
                 refreshLibrary()
-                mutableState.update { it.copy(schedule = entries, schoolConnection=SchoolConnection.Connected, notice = "找到 ${entries.size} 节课") }
+                mutableState.update { it.copy(schedule = entries, scheduleCheckedAt=System.currentTimeMillis(), schoolConnection=SchoolConnection.Connected, notice = "找到 ${entries.size} 节课") }
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
@@ -311,10 +477,10 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
             override fun image(page: ClassroomPage): ByteArray {checkAccount();return school.image(captured,page.url,if(live) state.value.settings.timeoutSeconds.coerceAtMost(12) else state.value.settings.timeoutSeconds)}
         }}
     }
-    fun startClassroom(entry: ScheduleEntry) {
+    fun startClassroom(entry: ScheduleEntry): Boolean {
         val previous=state.value.classroom
-        if(previous?.entry?.id==entry.id && classroomJob?.isActive==true) {resumeClassroom();return}
-        if(entry.id in queuedSources) {notice("此课次正在下载，请完成或取消下载后再跟看");return}
+        if(previous?.entry?.id==entry.id && classroomJob?.isActive==true) {resumeClassroom();return true}
+        if(entry.id in queuedSources) {notice("此课次正在下载，请完成或取消下载后再跟看");return false}
         val interval=getApplication<Application>().getSharedPreferences("classroom",0).getInt("interval",3).takeIf {it in setOf(3,5,10)} ?: 3
         val source=createPageSource(live=true)
         val generation=classroomGeneration.incrementAndGet()
@@ -322,9 +488,9 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
         mutableState.update {it.copy(classroom=ClassroomSession(entry,previous?.takeIf {it.entry.id==entry.id}?.materialId ?: state.value.materials.firstOrNull {it.sourceKey==entry.id && !it.deleted}?.id,
             stage=if(source==null) ClassroomStage.NeedsLogin else ClassroomStage.Connecting,intervalSeconds=interval,
             message=if(source==null) "请登录学校平台后继续，已有页面仍可阅读" else "正在连接课堂"))}
-        if(source==null) return
+        if(source==null) return true
         if(!source.owns(entry)) {
-            mutableState.update {it.copy(classroom=it.classroom?.copy(stage=ClassroomStage.NeedsLogin,message="请使用查询此课次的学校账号登录"))};return
+            mutableState.update {it.copy(classroom=it.classroom?.copy(stage=ClassroomStage.NeedsLogin,message="请使用查询此课次的学校账号登录"))};return false
         }
         classroomJob=viewModelScope.launch(Dispatchers.IO) {
             // A cancelled HTTP call can finish late. This lock keeps replacement
@@ -422,6 +588,7 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
                 catch(error: Exception) {publish {it.copy(stage=ClassroomStage.Ended,fetching=false,message=error.message ?: "无法开始跟看")}}
             }
         }
+        return true
     }
     suspend fun savePageNote(id: String,page: Int,text: String,source: String?=null) = withContext(Dispatchers.IO) {
         editMaterial(id) {current ->
@@ -589,13 +756,13 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
         return true
     }
 
-    fun download(entries: List<ScheduleEntry>) {
-        val source=createPageSource() ?: run {notice("请先登录学校平台");return}
+    fun download(entries: List<ScheduleEntry>): Boolean {
+        val source=createPageSource() ?: run {notice("请先登录学校平台");return false}
         val accepted=entries.distinctBy(ScheduleEntry::id).filter {entry ->
             if(!source.owns(entry)) {notice("请使用查询这些课次的学校账号登录");false}
             else releasePausedClassroom(entry) && queuedSources.add(entry.id)
         }
-        if(accepted.isEmpty()) return
+        if(accepted.isEmpty()) return false
         viewModelScope.launch(Dispatchers.IO) {
             val batchTime=System.currentTimeMillis()
             val tasks=accepted.mapIndexed {index,entry ->TaskRecord(type="download",title=entry.title+" · "+entry.day,payload=entry.json().toString(),createdAt=batchTime,batchOrder=index,message="等待下载")}
@@ -622,6 +789,7 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
                 notice(error.message ?: "无法添加下载任务")
             }
         }
+        return true
     }
 
     private suspend fun downloadTask(task: TaskRecord, entry: ScheduleEntry, source: ClassroomPageSource) {
