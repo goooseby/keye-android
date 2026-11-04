@@ -18,7 +18,6 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -45,6 +44,7 @@ import io.github.goooseby.keye.ui.LessonPreparationScreen
 import io.github.goooseby.keye.domain.schoolToday
 import io.github.goooseby.keye.domain.schoolWeek
 import org.json.JSONObject
+import io.github.goooseby.keye.ui.components.NavigationGlyph
 import io.github.goooseby.keye.ui.components.AppIcon
 import io.github.goooseby.keye.ui.components.EmptyState
 import io.github.goooseby.keye.ui.components.KeyeTheme
@@ -230,14 +230,8 @@ private fun KeyeApp(model: KeyeViewModel,mediaPath: (String) -> File,updates: Ap
                     HorizontalDivider(color=MaterialTheme.colorScheme.outlineVariant.copy(alpha=.45f),thickness=.5.dp)
                     NavigationBar(containerColor=MaterialTheme.colorScheme.surfaceContainer,tonalElevation=0.dp) {
                         listOf(Section.Timetable,Section.Library,Section.Settings).forEach{item ->
-                            val scale by animateFloatAsState(if(section==item) 1.08f else 1f,spring(stiffness=500f),label="navigation icon")
                             NavigationBarItem(selected=section==item,onClick={section=item},
-                                icon={
-                                    val active=state.tasks.count{it.status in setOf("running","queued")}
-                                    BadgedBox(badge={if(item==Section.Tasks&&active>0) Badge{Text(active.toString())}}) {
-                                        AppIcon(item.icon,modifier=Modifier.graphicsLayer{scaleX=scale;scaleY=scale})
-                                    }
-                                },label={Text(item.short,style=MaterialTheme.typography.labelMedium)},
+                                icon={NavigationGlyph(item.icon,section==item)},label={Text(item.short,style=MaterialTheme.typography.labelMedium)},
                                 colors=NavigationBarItemDefaults.colors(indicatorColor=MaterialTheme.colorScheme.primaryContainer,
                                     selectedIconColor=MaterialTheme.colorScheme.primary,selectedTextColor=MaterialTheme.colorScheme.primary,
                                     unselectedIconColor=MaterialTheme.colorScheme.onSurfaceVariant,unselectedTextColor=MaterialTheme.colorScheme.onSurfaceVariant))

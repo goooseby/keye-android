@@ -2,6 +2,17 @@ package io.github.goooseby.keye.ui.components
 
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Icon
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.Canvas
+import androidx.compose.runtime.*
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -69,4 +80,54 @@ fun AppIcon(name: String, description: String? = null, modifier: Modifier = Modi
         }.build()
     }
     Icon(vector, description, modifier.size(24.dp))
+}
+
+/** Compact selected-state drawings, with a single cancellable response per selection. */
+@Composable
+fun NavigationGlyph(name: String,selected: Boolean,modifier: Modifier=Modifier) {
+    val active by animateFloatAsState(if(selected) 1f else 0f,tween(220,easing=FastOutSlowInEasing),label="navigation detail")
+    val pulse=remember {Animatable(0f)}
+    var previous by remember {mutableStateOf(selected)}
+    LaunchedEffect(selected) {
+        val entering=selected && !previous
+        previous=selected
+        if(entering) {
+            pulse.animateTo(1f,tween(90,easing=LinearOutSlowInEasing))
+            pulse.animateTo(0f,tween(260,easing=FastOutSlowInEasing))
+        } else pulse.animateTo(0f,tween(120))
+    }
+    val color=LocalContentColor.current
+    val gear=remember {PathParser().parsePathString(glyphs.getValue("settings")).toPath()}
+    Canvas(modifier.size(24.dp).graphicsLayer {
+        scaleX=1f+pulse.value*.12f;scaleY=1f+pulse.value*.12f
+        translationY=-1.dp.toPx()*pulse.value
+        rotationZ=if(name=="settings") pulse.value*20f else 0f
+    }) {
+        withTransform({scale(size.width/24f,size.height/24f,pivot=Offset.Zero)}) {
+            val stroke=Stroke(1.7f,cap=StrokeCap.Round,join=StrokeJoin.Round)
+            fun line(x:Float,y:Float,endX:Float,endY:Float,alpha:Float=1f) = drawLine(color.copy(alpha=color.alpha*alpha),Offset(x,y),Offset(endX,endY),1.7f,StrokeCap.Round)
+            when(name) {
+                "calendar" -> {
+                    drawRoundRect(color.copy(alpha=.16f*active),Offset(3.8f,6.5f),Size(16.4f,4.5f),CornerRadius(1f))
+                    drawRoundRect(color,Offset(3f,5f),Size(18f,16f),CornerRadius(2f),style=stroke)
+                    line(7f,3f,7f,7f);line(17f,3f,17f,7f);line(3f,11f,21f,11f)
+                    line(7f,15f,9f,15f,1f-active);line(13f,15f,15f,15f,1f-active)
+                    val check=Path().apply {moveTo(8f,15.5f);lineTo(10.5f,18f);lineTo(16.5f,13.5f)}
+                    drawPath(check,color.copy(alpha=color.alpha*active),style=stroke)
+                }
+                "library" -> {
+                    for(left in listOf(true,false)) withTransform({rotate((if(left) -1f else 1f)*(active*3f+pulse.value*4f),Offset(if(left) 7f else 17f,20f))}) {
+                        val x=if(left) 3.5f else 13.5f
+                        drawRoundRect(color.copy(alpha=.15f*active),Offset(x,3f),Size(7f,18f),CornerRadius(1f))
+                        drawRoundRect(color,Offset(x,3f),Size(7f,18f),CornerRadius(1f),style=stroke)
+                        line(x+2.5f,7f,x+4.5f,7f);line(x+2.5f,17f,x+4.5f,17f)
+                    }
+                }
+                else -> {
+                    drawCircle(color.copy(alpha=.18f*active),3.3f,Offset(12f,12f))
+                    drawPath(gear,color,style=stroke)
+                }
+            }
+        }
+    }
 }

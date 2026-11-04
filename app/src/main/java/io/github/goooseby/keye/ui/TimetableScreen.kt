@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import io.github.goooseby.keye.KeyeViewModel
 import io.github.goooseby.keye.UiState
+import io.github.goooseby.keye.TimetableState
 import io.github.goooseby.keye.data.ScheduleEntry
 import io.github.goooseby.keye.domain.*
 import io.github.goooseby.keye.network.SchoolConnection
@@ -33,6 +34,8 @@ import io.github.goooseby.keye.ui.components.*
 import java.time.*
 import kotlinx.coroutines.delay
 import kotlin.math.max
+
+private data class WeekPresentation(val date: LocalDate,val timetable: TimetableState)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -46,6 +49,7 @@ fun TimetableScreen(state: UiState,model: KeyeViewModel,onLogin: ()->Unit,onOpen
     LaunchedEffect(Unit) {while(true) {now=System.currentTimeMillis();delay(15_000)}}
     val date=LocalDate.parse(dateText)
     val monday=schoolWeek(date)
+    val weekScroll=rememberScrollState()
     val tt=state.timetable
     val entries=if(tt.week==monday.toString()) tt.entries else emptyList()
     val fresh=state.loggedIn && state.schoolConnection==SchoolConnection.Connected && !tt.fromCache && tt.error==null && scheduleIsFresh(tt.checkedAt,now)
@@ -80,46 +84,61 @@ fun TimetableScreen(state: UiState,model: KeyeViewModel,onLogin: ()->Unit,onOpen
             IconButton(onClick={dateText=date.plusWeeks(1).toString()}) {AppIcon("next","下一周")}
             TextButton(onClick={dateText=schoolToday().toString();model.loadTimetableWeek(dateText)}) {Text("今天")}
         }
-        Row(Modifier.fillMaxWidth().padding(start=if(overview) 46.dp else 16.dp,end=if(overview) 12.dp else 16.dp,top=4.dp,bottom=4.dp),horizontalArrangement=Arrangement.spacedBy(if(overview) 0.dp else 4.dp)) {
-            val days=listOf("一","二","三","四","五","六","日")
-            repeat(7) {i ->
-                val day=monday.plusDays(i.toLong());val selected=day==date;val today=day==schoolToday()
-                val hasLessons=entries.any {it.day==day.toString()}
-                Surface(onClick={dateText=day.toString();overview=false},modifier=Modifier.weight(1f).semantics {contentDescription="${day.monthValue}月${day.dayOfMonth}日 星期${days[i]}${if(hasLessons) " 有课" else ""}";stateDescription=if(selected) "已选中" else "未选中"},
-                    shape=RoundedCornerShape(18.dp),color=if(selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface) {
-                    Column(Modifier.padding(vertical=6.dp),horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(2.dp)) {
-                        Text(if(today) "今" else days[i],style=MaterialTheme.typography.labelSmall,color=if(today||selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text("${day.dayOfMonth}",style=MaterialTheme.typography.titleMedium,fontWeight=if(selected||today) FontWeight.Bold else FontWeight.Medium)
-                        Box(Modifier.size(4.dp).background(if(hasLessons) MaterialTheme.colorScheme.primary else Color.Transparent,RoundedCornerShape(4.dp)))
+        val presentation=WeekPresentation(date,if(tt.week==monday.toString()) tt else TimetableState(week=monday.toString(),loading=state.loggedIn))
+        AnimatedContent(presentation,modifier=Modifier.weight(1f),contentKey={schoolWeek(it.date)},
+            transitionSpec={
+                val forward=schoolWeek(targetState.date).isAfter(schoolWeek(initialState.date))
+                ((slideInHorizontally(tween(280,easing=FastOutSlowInEasing)) {if(forward) it/7 else -it/7}+fadeIn(tween(200))) togetherWith
+                    (slideOutHorizontally(tween(240,easing=FastOutSlowInEasing)) {if(forward) -it/9 else it/9}+fadeOut(tween(140)))).using(null)
+            },label="timetable week") {page ->
+            val shownDate=page.date
+            val shownMonday=schoolWeek(shownDate)
+            val shownTt=page.timetable
+            val shownEntries=shownTt.entries
+            val shownFresh=state.loggedIn && state.schoolConnection==SchoolConnection.Connected && !shownTt.fromCache && shownTt.error==null && scheduleIsFresh(shownTt.checkedAt,now)
+            Column(Modifier.fillMaxSize()) {
+                Row(Modifier.fillMaxWidth().padding(start=if(overview) 46.dp else 16.dp,end=if(overview) 12.dp else 16.dp,top=4.dp,bottom=4.dp),horizontalArrangement=Arrangement.spacedBy(if(overview) 0.dp else 4.dp)) {
+                    val days=listOf("一","二","三","四","五","六","日")
+                    repeat(7) {i ->
+                        val day=shownMonday.plusDays(i.toLong());val selected=day==shownDate;val today=day==schoolToday()
+                        val hasLessons=shownEntries.any {it.day==day.toString()}
+                        Surface(onClick={dateText=day.toString();overview=false},modifier=Modifier.weight(1f).semantics {contentDescription="${day.monthValue}月${day.dayOfMonth}日 星期${days[i]}${if(hasLessons) " 有课" else ""}";stateDescription=if(selected) "已选中" else "未选中"},
+                            shape=RoundedCornerShape(18.dp),color=if(selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface) {
+                            Column(Modifier.padding(vertical=6.dp),horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(2.dp)) {
+                                Text(if(today) "今" else days[i],style=MaterialTheme.typography.labelSmall,color=if(today||selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("${day.dayOfMonth}",style=MaterialTheme.typography.titleMedium,fontWeight=if(selected||today) FontWeight.Bold else FontWeight.Medium)
+                                Box(Modifier.size(4.dp).background(if(hasLessons) MaterialTheme.colorScheme.primary else Color.Transparent,RoundedCornerShape(4.dp)))
+                            }
+                        }
                     }
                 }
-            }
-        }
-        Row(Modifier.fillMaxWidth().padding(start=20.dp,end=12.dp,top=0.dp,bottom=0.dp),verticalAlignment=Alignment.CenterVertically) {
-            Spacer(Modifier.weight(1f))
-            TextButton(onClick={overview=!overview}) {AppIcon(if(overview) "tasks" else "grid",modifier=Modifier.size(18.dp));Spacer(Modifier.width(6.dp));Text(if(overview) "当日课表" else "整周总览")}
-            IconButton(onClick={if(state.loggedIn) model.loadTimetableWeek(dateText,force=true) else onLogin()},enabled=!tt.loading) {AppIcon("refresh","刷新课表",Modifier.size(20.dp))}
-        }
-        if(tt.error!=null) Text("暂时无法更新，已保存课件仍可阅读",Modifier.padding(horizontal=20.dp,vertical=6.dp),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
-        PullToRefreshBox(isRefreshing=tt.loading,onRefresh={if(state.loggedIn) model.loadTimetableWeek(dateText,force=true) else model.loadTimetableWeek(dateText)},modifier=Modifier.weight(1f)) {
-            if(tt.loading && entries.isEmpty()) Box(Modifier.fillMaxSize(),contentAlignment=Alignment.Center) {CircularProgressIndicator(Modifier.size(24.dp),strokeWidth=2.dp)}
-            else if(entries.isEmpty() && tt.checkedAt==0L) Box(Modifier.fillMaxSize(),contentAlignment=Alignment.Center) {
-                EmptyState("calendar",if(!state.loggedIn) "这周尚未保存课表" else "暂时无法获取课表",detail=if(!state.loggedIn) "可切换已保存的周次，登录后获取这周课表" else "请检查网络后下拉重试")
-            }
-            else if(overview) WeekOverview(entries,monday,date,{dateText=it.toString();overview=false},fresh,::open,{overlap=it})
-            else key(dateText) {
-                LazyColumn(Modifier.fillMaxSize(),contentPadding=PaddingValues(start=20.dp,end=20.dp,top=8.dp,bottom=24.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
-                    val daily=entries.filter {it.day==dateText}.sortedBy {it.startsAt ?: Long.MAX_VALUE}
-                    if(daily.isEmpty()) item {EmptyState("calendar",if(!state.loggedIn && tt.checkedAt==0L) "这周尚未保存课表" else if(tt.error!=null && tt.checkedAt==0L) "暂时无法获取课表" else "这一天没有课程",detail=if(!state.loggedIn && tt.checkedAt==0L) "可切换已保存的周次，登录后获取这周课表" else if(tt.error!=null) "请检查网络后下拉重试" else "切换上方日期，或查看整周安排")}
-                    items(daily,key=ScheduleEntry::id) {entry ->
-                        val material=state.materials.firstOrNull {it.sourceKey==entry.id}
-                        Row(Modifier.fillMaxWidth().animateItem(),horizontalArrangement=Arrangement.spacedBy(12.dp)) {
-                            Column(Modifier.width(46.dp).padding(top=16.dp),horizontalAlignment=Alignment.Start) {
-                                Text(lessonTime(entry.startsAt),style=MaterialTheme.typography.labelMedium,color=MaterialTheme.colorScheme.onSurface)
-                                Text(entry.endsAt?.let {lessonTime(it)} ?: "",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
-                                Box(Modifier.padding(start=3.dp,top=10.dp).width(2.dp).height(36.dp).background(MaterialTheme.colorScheme.outlineVariant.copy(alpha=.5f),RoundedCornerShape(2.dp)))
+                Row(Modifier.fillMaxWidth().padding(start=20.dp,end=12.dp,top=0.dp,bottom=0.dp),verticalAlignment=Alignment.CenterVertically) {
+                    Spacer(Modifier.weight(1f))
+                    TextButton(onClick={overview=!overview}) {AppIcon(if(overview) "tasks" else "grid",modifier=Modifier.size(18.dp));Spacer(Modifier.width(6.dp));Text(if(overview) "当日课表" else "整周总览")}
+                    IconButton(onClick={if(state.loggedIn) model.loadTimetableWeek(dateText,force=true) else onLogin()},enabled=!shownTt.loading) {AppIcon("refresh","刷新课表",Modifier.size(20.dp))}
+                }
+                if(shownTt.error!=null) Text("暂时无法更新，已保存课件仍可阅读",Modifier.padding(horizontal=20.dp,vertical=6.dp),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                PullToRefreshBox(isRefreshing=shownTt.loading,onRefresh={if(state.loggedIn) model.loadTimetableWeek(dateText,force=true) else model.loadTimetableWeek(dateText)},modifier=Modifier.weight(1f)) {
+                    if(shownTt.loading && shownEntries.isEmpty()) Box(Modifier.fillMaxSize(),contentAlignment=Alignment.Center) {CircularProgressIndicator(Modifier.size(24.dp),strokeWidth=2.dp)}
+                    else if(shownEntries.isEmpty() && shownTt.checkedAt==0L) Box(Modifier.fillMaxSize(),contentAlignment=Alignment.Center) {
+                        EmptyState("calendar",if(!state.loggedIn) "这周尚未保存课表" else "暂时无法获取课表",detail=if(!state.loggedIn) "可切换已保存的周次，登录后获取这周课表" else "请检查网络后下拉重试")
+                    }
+                    else if(overview) WeekOverview(shownEntries,shownMonday,shownDate,weekScroll,{dateText=it.toString();overview=false},shownFresh,::open,{overlap=it})
+                    else key(shownDate) {
+                        LazyColumn(Modifier.fillMaxSize(),contentPadding=PaddingValues(start=20.dp,end=20.dp,top=8.dp,bottom=24.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
+                            val daily=shownEntries.filter {it.day==shownDate.toString()}.sortedBy {it.startsAt ?: Long.MAX_VALUE}
+                            if(daily.isEmpty()) item {EmptyState("calendar",if(!state.loggedIn && shownTt.checkedAt==0L) "这周尚未保存课表" else if(shownTt.error!=null && shownTt.checkedAt==0L) "暂时无法获取课表" else "这一天没有课程",detail=if(!state.loggedIn && shownTt.checkedAt==0L) "可切换已保存的周次，登录后获取这周课表" else if(shownTt.error!=null) "请检查网络后下拉重试" else "切换上方日期，或查看整周安排")}
+                            items(daily,key=ScheduleEntry::id) {entry ->
+                                val material=state.materials.firstOrNull {it.sourceKey==entry.id}
+                                Row(Modifier.fillMaxWidth().animateItem(),horizontalArrangement=Arrangement.spacedBy(12.dp)) {
+                                    Column(Modifier.width(46.dp).padding(top=16.dp),horizontalAlignment=Alignment.Start) {
+                                        Text(lessonTime(entry.startsAt),style=MaterialTheme.typography.labelMedium,color=MaterialTheme.colorScheme.onSurface)
+                                        Text(entry.endsAt?.let {lessonTime(it)} ?: "",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Box(Modifier.padding(start=3.dp,top=10.dp).width(2.dp).height(36.dp).background(MaterialTheme.colorScheme.outlineVariant.copy(alpha=.5f),RoundedCornerShape(2.dp)))
+                                    }
+                                    LessonCard(entry,shownFresh,material?.let {if(it.deleted) "在回收站" else if(it.remotePageCount!=null && it.pages.size<it.remotePageCount) "已存 ${it.pages.size}/${it.remotePageCount} 页 · 待补全" else "已存 ${it.pages.size} 页"},Modifier.weight(1f)) {open(entry)}
+                                }
                             }
-                            LessonCard(entry,fresh,material?.let {if(it.deleted) "在回收站" else if(it.remotePageCount!=null && it.pages.size<it.remotePageCount) "已存 ${it.pages.size}/${it.remotePageCount} 页 · 待补全" else "已存 ${it.pages.size} 页"},Modifier.weight(1f)) {open(entry)}
                         }
                     }
                 }
@@ -213,12 +232,12 @@ internal fun LiveQuickEntry(state: UiState,onFollow: (ScheduleEntry)->Unit,onTim
 }
 
 @Composable
-private fun WeekOverview(entries: List<ScheduleEntry>,monday: LocalDate,selected: LocalDate,onDate: (LocalDate)->Unit,fresh: Boolean,onOpen: (ScheduleEntry)->Unit,onOverlap: (List<ScheduleEntry>)->Unit) {
+private fun WeekOverview(entries: List<ScheduleEntry>,monday: LocalDate,selected: LocalDate,scrollState: ScrollState,onDate: (LocalDate)->Unit,fresh: Boolean,onOpen: (ScheduleEntry)->Unit,onOverlap: (List<ScheduleEntry>)->Unit) {
     val placements=placeLessons(entries)
     val start=(placements.minOfOrNull {it.startMinute/60} ?: 8).coerceAtMost(8).coerceAtLeast(0)
     val end=max(18,placements.maxOfOrNull {(it.endMinute+59)/60} ?: 18).coerceAtMost(24)
     val hour=60.dp
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start=8.dp,end=12.dp,bottom=24.dp)) {
+    Column(Modifier.fillMaxSize().verticalScroll(scrollState).padding(start=8.dp,end=12.dp,bottom=24.dp)) {
         BoxWithConstraints(Modifier.fillMaxWidth().height(hour*(end-start))) {
             val dayWidth=(maxWidth-38.dp)/7
             Column {
