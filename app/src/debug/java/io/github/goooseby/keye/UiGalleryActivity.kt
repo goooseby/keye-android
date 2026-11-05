@@ -43,6 +43,16 @@ class UiGalleryActivity: ComponentActivity() {
         setContent {KeyeTheme {
             val model: KeyeViewModel=viewModel()
             val actual by model.state.collectAsState()
+            if(page=="login-live") {
+                io.github.goooseby.keye.ui.SchoolLoginScreen(model,{
+                    File(filesDir,"qa/login-live-check.json").apply {parentFile?.mkdirs()}.writeText(org.json.JSONObject()
+                        .put("attempt",intent.getStringExtra("attempt"))
+                        .put("connected",model.state.value.schoolConnection==SchoolConnection.Connected)
+                        .put("loggedIn",model.state.value.loggedIn).toString())
+                    finish()
+                },automaticVerification=intent.getBooleanExtra("automatic",true))
+                return@KeyeTheme
+            }
             if(page=="login-error") {
                 io.github.goooseby.keye.ui.SchoolLoginScreen(model,{finish()},initialPage=intent.getStringExtra("url") ?: "https://127.0.0.1:1/",verifySession=false)
                 return@KeyeTheme

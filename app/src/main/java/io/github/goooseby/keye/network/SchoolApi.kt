@@ -13,6 +13,8 @@ import java.net.URLDecoder
 import java.security.MessageDigest
 import java.time.LocalDate
 import org.json.JSONObject
+import org.json.JSONArray
+import io.github.goooseby.keye.domain.schoolToday
 
 data class SchoolAuth(
     val cookie: String,
@@ -146,10 +148,24 @@ class SchoolApi {
         return response
     }
 
+    private fun scheduleResponse(auth: SchoolAuth,start: LocalDate,end: LocalDate,timeoutSeconds: Int): JSONObject {
+        val response=getJson("/courseapi/v2/schedule/get-week-schedules",mapOf(
+            "user_id" to auth.userId,"tenant_id" to auth.tenantId,
+            "start_at" to start.toString(),"end_at" to end.toString(),"token" to auth.jwt
+        ),auth,timeoutSeconds)
+        val result=response.optJSONObject("result")
+        when(schoolScheduleStatus(if(response.isNull("success")) null else response.optBoolean("success"),result?.optString("code")?.toIntOrNull(),result?.optString("msg"))) {
+            SchoolScheduleStatus.NeedsLogin ->throw SchoolSessionExpired()
+            SchoolScheduleStatus.Unavailable ->throw IllegalStateException("学校课表服务暂时不可用，请稍后重试")
+            else ->return response
+        }
+    }
+
     fun verifySession(auth: SchoolAuth,timeoutSeconds: Int) {
-        // One day is sufficient to validate the authenticated schedule endpoint;
-        // an empty course list is a successful connection too.
-        scan(auth,LocalDate.now(),LocalDate.now(),timeoutSeconds)
+        // Confirm the authenticated reply, independently of course rows and their schema.
+        // A no-class day is a valid session, not a failed login.
+        val today=schoolToday()
+        scheduleResponse(auth,today,today,timeoutSeconds)
     }
 
     fun scan(auth: SchoolAuth, start: LocalDate, end: LocalDate, timeoutSeconds: Int): List<ScheduleEntry> {
@@ -160,16 +176,11 @@ class SchoolApi {
         var day = start
         while (!day.isAfter(end)) {
             val last = day.plusDays(6).let { if (it.isAfter(end)) end else it }
-            val response = getJson(
-                "/courseapi/v2/schedule/get-week-schedules",
-                mapOf(
-                    "user_id" to auth.userId, "tenant_id" to auth.tenantId,
-                    "start_at" to day.toString(), "end_at" to last.toString(),
-                    "token" to auth.jwt
-                ), auth, timeoutSeconds
-            )
-            val blocks = response.optJSONObject("result")?.optJSONArray("list")
-                ?: throw IllegalStateException("课表数据不完整，请稍后重试")
+            val response=scheduleResponse(auth,day,last,timeoutSeconds)
+            val payload=response.getJSONObject("result")
+            val blocks=payload.optJSONArray("list") ?: if(payload.isNull("list") &&
+                schoolScheduleStatus(true,payload.optString("code").toIntOrNull(),payload.optString("msg"))==SchoolScheduleStatus.Empty) JSONArray()
+                else throw IllegalStateException("课表数据不完整，请稍后重试")
             for (index in 0 until blocks.length()) {
                 val block = blocks.getJSONObject(index)
                 val date = block.optString("day")

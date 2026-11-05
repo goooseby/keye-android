@@ -33,7 +33,7 @@ import kotlinx.coroutines.launch
 import kotlin.math.max
 
 @Composable
-fun SchoolLoginScreen(model: KeyeViewModel,onClose: ()->Unit,initialPage: String=SchoolApi.HOME,verifySession: Boolean=true) {
+fun SchoolLoginScreen(model: KeyeViewModel,onClose: ()->Unit,initialPage: String=SchoolApi.HOME,verifySession: Boolean=true,automaticVerification: Boolean=true) {
     var browser by remember {mutableStateOf<WebView?>(null)}
     var generation by remember {mutableIntStateOf(0)}
     var navigation by remember {mutableIntStateOf(0)}
@@ -94,8 +94,8 @@ fun SchoolLoginScreen(model: KeyeViewModel,onClose: ()->Unit,initialPage: String
     LaunchedEffect(navigation,loading) {
         if(loading) {delay(12_000);if(loading) slow=true}
     }
-    LaunchedEffect(lifecycle,verifySession) {
-        if(verifySession) lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+    LaunchedEffect(lifecycle,verifySession,automaticVerification) {
+        if(verifySession && automaticVerification) lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             while(true) {
                 delay(1_000)
                 val cookie=CookieManager.getInstance().getCookie(SchoolApi.HOME)

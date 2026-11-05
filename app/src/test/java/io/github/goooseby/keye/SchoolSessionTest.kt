@@ -41,4 +41,19 @@ class SchoolSessionTest {
         assertFalse(io.github.goooseby.keye.network.sameLoginDocument("https://sso.example.edu/login?step=1","https://sso.example.edu/login?step=2"))
         assertFalse(io.github.goooseby.keye.network.sameLoginDocument(null,"https://sso.example.edu/login"))
     }
+
+    @Test fun authenticatedNoClassDayIsNotALoginFailure() {
+        assertEquals(io.github.goooseby.keye.network.SchoolScheduleStatus.Empty,io.github.goooseby.keye.network.schoolScheduleStatus(true,400,"课表为空"))
+        assertEquals(io.github.goooseby.keye.network.SchoolScheduleStatus.Ready,io.github.goooseby.keye.network.schoolScheduleStatus(true,200,""))
+    }
+    @Test fun unknownBadRequestsAndFailedEnvelopesAreNotTreatedAsEmptyOrLoggedIn() {
+        val unavailable=io.github.goooseby.keye.network.SchoolScheduleStatus.Unavailable
+        assertEquals(unavailable,io.github.goooseby.keye.network.schoolScheduleStatus(true,400,"参数错误"))
+        assertEquals(unavailable,io.github.goooseby.keye.network.schoolScheduleStatus(false,400,"课表为空"))
+        assertEquals(unavailable,io.github.goooseby.keye.network.schoolScheduleStatus(false,200,""))
+        assertEquals(unavailable,io.github.goooseby.keye.network.schoolScheduleStatus(null,null,null))
+        assertEquals(unavailable,io.github.goooseby.keye.network.schoolScheduleStatus(true,500,""))
+        assertEquals(io.github.goooseby.keye.network.SchoolScheduleStatus.NeedsLogin,io.github.goooseby.keye.network.schoolScheduleStatus(false,401,""))
+        assertEquals(io.github.goooseby.keye.network.SchoolScheduleStatus.NeedsLogin,io.github.goooseby.keye.network.schoolScheduleStatus(true,403,""))
+    }
 }

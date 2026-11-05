@@ -40,3 +40,14 @@ internal fun loginVerificationRetryDelay(failures: Int): Long? = when(failures) 
 /** Ignore fragment navigation, but never let a stale request replace a newer document. */
 internal fun sameLoginDocument(callback: String?,current: String?): Boolean =
     !callback.isNullOrBlank() && !current.isNullOrBlank() && callback.substringBefore('#')==current.substringBefore('#')
+
+internal enum class SchoolScheduleStatus { Ready, Empty, NeedsLogin, Unavailable }
+
+/** The platform explicitly reports an authenticated no-class day as code 400. */
+internal fun schoolScheduleStatus(success: Boolean?,code: Int?,message: String?): SchoolScheduleStatus = when {
+    code==401 || code==403 ->SchoolScheduleStatus.NeedsLogin
+    success!=true ->SchoolScheduleStatus.Unavailable
+    code==200 ->SchoolScheduleStatus.Ready
+    code==400 && message?.trim()=="课表为空" ->SchoolScheduleStatus.Empty
+    else ->SchoolScheduleStatus.Unavailable
+}
