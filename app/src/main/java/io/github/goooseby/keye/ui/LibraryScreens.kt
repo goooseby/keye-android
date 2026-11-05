@@ -38,6 +38,7 @@ import io.github.goooseby.keye.data.ScheduleEntry
 import io.github.goooseby.keye.ui.components.AppIcon
 import io.github.goooseby.keye.ui.components.EmptyState
 import io.github.goooseby.keye.ui.components.IconBadge
+import io.github.goooseby.keye.ui.components.PageMotion
 import io.github.goooseby.keye.ui.components.PageImage
 import io.github.goooseby.keye.ui.components.PillTabs
 import io.github.goooseby.keye.ui.components.SearchField
@@ -77,11 +78,12 @@ fun LibraryScreen(state: UiState, onCourse: (String?) -> Unit, onMaterial: (Stri
     var selected by remember { mutableStateOf(emptySet<String>()) }
     BackHandler(selected.isNotEmpty()) { selected=emptySet() }
     val largeType=LocalDensity.current.fontScale>1.2f
-    val active = state.materials.filterNot(StudyMaterial::deleted)
-    val listed = state.materials.filter { it.deleted==(tab==2) && (it.title.contains(search,true)||it.note.contains(search,true)) }
-        .sortedWith(compareByDescending<StudyMaterial>{it.readAt}.thenByDescending {it.touched})
-    val chosen = active.filter { it.id in selected }
-    val matchedCourses=state.courses.filter{it.title.contains(search,true)||it.term.contains(search,true)}.sortedBy(Course::title)
+    val active = remember(state.materials) {state.materials.filterNot(StudyMaterial::deleted)}
+    val courseCounts = remember(active) {active.groupingBy(StudyMaterial::courseId).eachCount()}
+    val chosen = remember(active,selected) {active.filter {it.id in selected}}
+    val matchedCourses = remember(state.courses,search) {
+        state.courses.filter {it.title.contains(search,true)||it.term.contains(search,true)}.sortedBy(Course::title)
+    }
     Box(Modifier.fillMaxSize()) {
         Column {
             AnimatedContent(selected.isNotEmpty(), transitionSpec={fadeIn(tween(150)) togetherWith fadeOut(tween(100))}, label="selection header") { selecting ->
@@ -90,43 +92,51 @@ fun LibraryScreen(state: UiState, onCourse: (String?) -> Unit, onMaterial: (Stri
                     Text("已选 ${chosen.size} 份", style=MaterialTheme.typography.titleMedium)
                 } else if(!trashMode) PillTabs(if(tab==2) listOf("最近阅读","全部课程","回收站") else listOf("最近阅读","全部课程"), if(tab==0) 1 else if(tab==1) 0 else 2, {tab=if(it==0) 1 else if(it==1) 0 else 2;search=""}, Modifier.padding(horizontal=20.dp, vertical=4.dp))
             }
-            LazyVerticalGrid(columns=if(largeType) GridCells.Fixed(1) else GridCells.Adaptive(148.dp), modifier=Modifier.weight(1f),
-                contentPadding=PaddingValues(start=20.dp,end=20.dp,top=12.dp,bottom=if(tab==0 && selected.isEmpty()) 24.dp else 100.dp),
-                horizontalArrangement=Arrangement.spacedBy(10.dp), verticalArrangement=Arrangement.spacedBy(10.dp)) {
-                if(hasLive && tab!=2 && search.isBlank() && selected.isEmpty()) item(span={GridItemSpan(maxLineSpan)},key="live") {LiveQuickEntry(state,onFollow,onTimetable)}
-                item(span={GridItemSpan(maxLineSpan)}, key="search") { SearchField(search,{search=it},if(tab==0) "搜索课程" else "搜索课件或备注") }
-                if(tab==0) {
-                    item(span={GridItemSpan(maxLineSpan)}, key="courses heading") {
-                        Row(Modifier.fillMaxWidth(), verticalAlignment=Alignment.CenterVertically) {
-                            Text("课程 · ${state.courses.size}",Modifier.weight(1f),style=MaterialTheme.typography.labelLarge,color=MaterialTheme.colorScheme.onSurfaceVariant)
-                            TextButton(onClick=onImport) {Text("导入")}
-                            TextButton(onClick={newCourse=true}) {AppIcon("add",modifier=Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text("新建")}
-                        }
-                    }
-                    items(matchedCourses,key=Course::id,span={GridItemSpan(if(matchedCourses.size==1) maxLineSpan else 1)}) { course ->
-                        CourseTile(course,active.count {it.courseId==course.id},Modifier.animateItem(),wide=matchedCourses.size==1||largeType) {onCourse(course.id)}
-                    }
-                    if(search.isBlank()&&active.any{it.courseId==null}) item(span={GridItemSpan(maxLineSpan)},key="unfiled") {
-                        Surface(onClick={onCourse(null)},shape=RoundedCornerShape(18.dp),color=MaterialTheme.colorScheme.surfaceContainer) {
-                            Row(Modifier.padding(16.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(14.dp)) {
-                                IconBadge("folder",background=MaterialTheme.colorScheme.surfaceVariant,tint=MaterialTheme.colorScheme.onSurfaceVariant)
-                                Column(Modifier.weight(1f)) {Text("未归类",style=MaterialTheme.typography.titleMedium);Text("${active.count {it.courseId==null}} 份课件",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)}
-                                AppIcon("next",modifier=Modifier.size(18.dp))
+            val grids=listOf(rememberLazyGridState(),rememberLazyGridState(),rememberLazyGridState())
+            AnimatedContent(tab,modifier=Modifier.weight(1f),
+                transitionSpec={PageMotion.between(0,0,0).using(null)},label="library category") {shownTab ->
+                val listed = remember(state.materials,shownTab,search) {
+                    state.materials.filter { it.deleted==(shownTab==2) && (it.title.contains(search,true)||it.note.contains(search,true)) }
+                        .sortedWith(compareByDescending<StudyMaterial>{it.readAt}.thenByDescending {it.touched})
+                }
+                LazyVerticalGrid(state=grids[shownTab],columns=if(largeType) GridCells.Fixed(1) else GridCells.Adaptive(148.dp), modifier=Modifier.fillMaxSize(),
+                    contentPadding=PaddingValues(start=20.dp,end=20.dp,top=12.dp,bottom=if(shownTab==0 && selected.isEmpty()) 24.dp else 100.dp),
+                    horizontalArrangement=Arrangement.spacedBy(10.dp), verticalArrangement=Arrangement.spacedBy(10.dp)) {
+                    if(hasLive && shownTab!=2 && search.isBlank() && selected.isEmpty()) item(span={GridItemSpan(maxLineSpan)},key="live") {LiveQuickEntry(state,onFollow,onTimetable)}
+                    item(span={GridItemSpan(maxLineSpan)}, key="search") { SearchField(search,{search=it},if(shownTab==0) "搜索课程" else "搜索课件或备注") }
+                    if(shownTab==0) {
+                        item(span={GridItemSpan(maxLineSpan)}, key="courses heading") {
+                            Row(Modifier.fillMaxWidth(), verticalAlignment=Alignment.CenterVertically) {
+                                Text("课程 · ${state.courses.size}",Modifier.weight(1f),style=MaterialTheme.typography.labelLarge,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                                TextButton(onClick=onImport) {Text("导入")}
+                                TextButton(onClick={newCourse=true}) {AppIcon("add",modifier=Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text("新建")}
                             }
                         }
-                    }
-                    if(state.courses.isEmpty() && search.isBlank()) item(span={GridItemSpan(maxLineSpan)}) {
-                        EmptyState("library","还没有课程",action="新建课程",onAction={newCourse=true})
-                    }
-                    if(search.isNotBlank() && state.courses.none {it.title.contains(search,true)||it.term.contains(search,true)}) item(span={GridItemSpan(maxLineSpan)}) {EmptyState("search","没有找到课程",detail="试试其他关键词")}
-                } else {
-                    item(span={GridItemSpan(maxLineSpan)}) {Text(if(tab==2) "${listed.size} 份已移除的课件" else if(listed.any{it.readAt>0}) "继续阅读" else "最近加入",style=MaterialTheme.typography.labelMedium,color=MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.padding(vertical=4.dp))}
-                    if(listed.isEmpty()) item(span={GridItemSpan(maxLineSpan)}) {EmptyState(if(tab==2) "trash" else "document",if(search.isNotBlank()) "没有找到课件" else if(tab==2) "回收站为空" else "暂无课件",action=if(tab==1 && search.isBlank()) "导入资料" else null,onAction=onImport)}
-                    items(listed,key=StudyMaterial::id,span={GridItemSpan(maxLineSpan)}) { m ->
-                        MaterialCard(m,{if(m.deleted) restore=m else onMaterial(m.id)},{onExport(m.id,m.title)},{model.setDeleted(m.id,!m.deleted)},mediaPath,
-                            selected=if(selected.isNotEmpty()) m.id in selected else null,
-                            onSelect={selected=if(m.id in selected) selected-m.id else selected+m.id},
-                            onLongPress=if(!m.deleted) ({selected=selected+m.id}) else null,modifier=Modifier.animateItem())
+                        items(matchedCourses,key=Course::id,span={GridItemSpan(if(matchedCourses.size==1) maxLineSpan else 1)}) { course ->
+                            CourseTile(course,(courseCounts[course.id] ?: 0),Modifier.animateItem(),wide=matchedCourses.size==1||largeType) {onCourse(course.id)}
+                        }
+                        if(search.isBlank()&&(courseCounts[null] ?: 0)>0) item(span={GridItemSpan(maxLineSpan)},key="unfiled") {
+                            Surface(onClick={onCourse(null)},shape=RoundedCornerShape(18.dp),color=MaterialTheme.colorScheme.surfaceContainer) {
+                                Row(Modifier.padding(16.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(14.dp)) {
+                                    IconBadge("folder",background=MaterialTheme.colorScheme.surfaceVariant,tint=MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Column(Modifier.weight(1f)) {Text("未归类",style=MaterialTheme.typography.titleMedium);Text("${courseCounts[null] ?: 0} 份课件",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)}
+                                    AppIcon("next",modifier=Modifier.size(18.dp))
+                                }
+                            }
+                        }
+                        if(state.courses.isEmpty() && search.isBlank()) item(span={GridItemSpan(maxLineSpan)}) {
+                            EmptyState("library","还没有课程",action="新建课程",onAction={newCourse=true})
+                        }
+                        if(search.isNotBlank() && state.courses.none {it.title.contains(search,true)||it.term.contains(search,true)}) item(span={GridItemSpan(maxLineSpan)}) {EmptyState("search","没有找到课程",detail="试试其他关键词")}
+                    } else {
+                        item(span={GridItemSpan(maxLineSpan)}) {Text(if(shownTab==2) "${listed.size} 份已移除的课件" else if(listed.any{it.readAt>0}) "继续阅读" else "最近加入",style=MaterialTheme.typography.labelMedium,color=MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.padding(vertical=4.dp))}
+                        if(listed.isEmpty()) item(span={GridItemSpan(maxLineSpan)}) {EmptyState(if(shownTab==2) "trash" else "document",if(search.isNotBlank()) "没有找到课件" else if(shownTab==2) "回收站为空" else "暂无课件",action=if(shownTab==1 && search.isBlank()) "导入资料" else null,onAction=onImport)}
+                        items(listed,key=StudyMaterial::id,span={GridItemSpan(maxLineSpan)}) { m ->
+                            MaterialCard(m,{if(m.deleted) restore=m else onMaterial(m.id)},{onExport(m.id,m.title)},{model.setDeleted(m.id,!m.deleted)},mediaPath,
+                                selected=if(selected.isNotEmpty()) m.id in selected else null,
+                                onSelect={selected=if(m.id in selected) selected-m.id else selected+m.id},
+                                onLongPress=if(!m.deleted) ({selected=selected+m.id}) else null,modifier=Modifier.animateItem())
+                        }
                     }
                 }
             }
@@ -206,7 +216,10 @@ fun CourseScreen(course: Course?,courses: List<Course>,materials: List<StudyMate
     var menu by remember {mutableStateOf(false)}
     BackHandler(selecting){selecting=false;selected=emptySet()}
     var ascending by rememberSaveable {mutableStateOf(false)}
-    val chosen=materials.filter{it.id in selected}
+    val chosen=remember(materials,selected) {materials.filter {it.id in selected}}
+    val orderedMaterials=remember(materials,ascending) {
+        if(ascending) materials.sortedBy(StudyMaterial::day) else materials.sortedByDescending(StudyMaterial::day)
+    }
     val (background,accent)=courseTone(course?.id.orEmpty())
     Box(Modifier.fillMaxSize()) {
         LazyColumn(contentPadding=PaddingValues(20.dp,12.dp,20.dp,112.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
@@ -236,7 +249,7 @@ fun CourseScreen(course: Course?,courses: List<Course>,materials: List<StudyMate
                 }
             }
             if(materials.isEmpty()) item {EmptyState("document","此课程暂无课件",action="导入资料",onAction=onImport)}
-            items(if(ascending) materials.sortedBy(StudyMaterial::day) else materials.sortedByDescending(StudyMaterial::day),key=StudyMaterial::id) {m ->
+            items(orderedMaterials,key=StudyMaterial::id) {m ->
                 MaterialCard(m,{onOpen(m.id)},{onExport(m.id,m.title)},{model.setDeleted(m.id,true)},mediaPath,
                     selected=if(selecting) m.id in selected else null,
                     onSelect={selected=if(m.id in selected) selected-m.id else selected+m.id},

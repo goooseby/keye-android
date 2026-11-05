@@ -119,24 +119,27 @@ fun TimetableScreen(state: UiState,model: KeyeViewModel,onLogin: ()->Unit,onOpen
                 }
                 if(shownTt.error!=null) Text("暂时无法更新，已保存课件仍可阅读",Modifier.padding(horizontal=20.dp,vertical=6.dp),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                 PullToRefreshBox(isRefreshing=shownTt.loading,onRefresh={if(state.loggedIn) model.loadTimetableWeek(dateText,force=true) else model.loadTimetableWeek(dateText)},modifier=Modifier.weight(1f)) {
-                    if(shownTt.loading && shownEntries.isEmpty()) Box(Modifier.fillMaxSize(),contentAlignment=Alignment.Center) {CircularProgressIndicator(Modifier.size(24.dp),strokeWidth=2.dp)}
-                    else if(shownEntries.isEmpty() && shownTt.checkedAt==0L) Box(Modifier.fillMaxSize(),contentAlignment=Alignment.Center) {
-                        EmptyState("calendar",if(!state.loggedIn) "这周尚未保存课表" else "暂时无法获取课表",detail=if(!state.loggedIn) "可切换已保存的周次，登录后获取这周课表" else "请检查网络后下拉重试")
-                    }
-                    else if(overview) WeekOverview(shownEntries,shownMonday,shownDate,weekScroll,{dateText=it.toString();overview=false},shownFresh,::open,{overlap=it})
-                    else key(shownDate) {
-                        LazyColumn(Modifier.fillMaxSize(),contentPadding=PaddingValues(start=20.dp,end=20.dp,top=8.dp,bottom=24.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
-                            val daily=shownEntries.filter {it.day==shownDate.toString()}.sortedBy {it.startsAt ?: Long.MAX_VALUE}
-                            if(daily.isEmpty()) item {EmptyState("calendar",if(!state.loggedIn && shownTt.checkedAt==0L) "这周尚未保存课表" else if(shownTt.error!=null && shownTt.checkedAt==0L) "暂时无法获取课表" else "这一天没有课程",detail=if(!state.loggedIn && shownTt.checkedAt==0L) "可切换已保存的周次，登录后获取这周课表" else if(shownTt.error!=null) "请检查网络后下拉重试" else "切换上方日期，或查看整周安排")}
-                            items(daily,key=ScheduleEntry::id) {entry ->
-                                val material=state.materials.firstOrNull {it.sourceKey==entry.id}
-                                Row(Modifier.fillMaxWidth().animateItem(),horizontalArrangement=Arrangement.spacedBy(12.dp)) {
-                                    Column(Modifier.width(46.dp).padding(top=16.dp),horizontalAlignment=Alignment.Start) {
-                                        Text(lessonTime(entry.startsAt),style=MaterialTheme.typography.labelMedium,color=MaterialTheme.colorScheme.onSurface)
-                                        Text(entry.endsAt?.let {lessonTime(it)} ?: "",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
-                                        Box(Modifier.padding(start=3.dp,top=10.dp).width(2.dp).height(36.dp).background(MaterialTheme.colorScheme.outlineVariant.copy(alpha=.5f),RoundedCornerShape(2.dp)))
+                    AnimatedContent(if(overview) null else shownDate,modifier=Modifier.fillMaxSize(),
+                        transitionSpec={PageMotion.between(0,0,0).using(null)},label="timetable view") {day ->
+                        if(shownTt.loading && shownEntries.isEmpty()) Box(Modifier.fillMaxSize(),contentAlignment=Alignment.Center) {CircularProgressIndicator(Modifier.size(24.dp),strokeWidth=2.dp)}
+                        else if(shownEntries.isEmpty() && shownTt.checkedAt==0L) Box(Modifier.fillMaxSize(),contentAlignment=Alignment.Center) {
+                            EmptyState("calendar",if(!state.loggedIn) "这周尚未保存课表" else "暂时无法获取课表",detail=if(!state.loggedIn) "可切换已保存的周次，登录后获取这周课表" else "请检查网络后下拉重试")
+                        }
+                        else if(day==null) WeekOverview(shownEntries,shownMonday,shownDate,weekScroll,{dateText=it.toString();overview=false},shownFresh,::open,{overlap=it})
+                        else key(day) {
+                            LazyColumn(Modifier.fillMaxSize(),contentPadding=PaddingValues(start=20.dp,end=20.dp,top=8.dp,bottom=24.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
+                                val daily=shownEntries.filter {it.day==day.toString()}.sortedBy {it.startsAt ?: Long.MAX_VALUE}
+                                if(daily.isEmpty()) item {EmptyState("calendar",if(!state.loggedIn && shownTt.checkedAt==0L) "这周尚未保存课表" else if(shownTt.error!=null && shownTt.checkedAt==0L) "暂时无法获取课表" else "这一天没有课程",detail=if(!state.loggedIn && shownTt.checkedAt==0L) "可切换已保存的周次，登录后获取这周课表" else if(shownTt.error!=null) "请检查网络后下拉重试" else "切换上方日期，或查看整周安排")}
+                                items(daily,key=ScheduleEntry::id) {entry ->
+                                    val material=state.materials.firstOrNull {it.sourceKey==entry.id}
+                                    Row(Modifier.fillMaxWidth().animateItem(),horizontalArrangement=Arrangement.spacedBy(12.dp)) {
+                                        Column(Modifier.width(46.dp).padding(top=16.dp),horizontalAlignment=Alignment.Start) {
+                                            Text(lessonTime(entry.startsAt),style=MaterialTheme.typography.labelMedium,color=MaterialTheme.colorScheme.onSurface)
+                                            Text(entry.endsAt?.let {lessonTime(it)} ?: "",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                                            Box(Modifier.padding(start=3.dp,top=10.dp).width(2.dp).height(36.dp).background(MaterialTheme.colorScheme.outlineVariant.copy(alpha=.5f),RoundedCornerShape(2.dp)))
+                                        }
+                                        LessonCard(entry,shownFresh,material?.let {if(it.deleted) "在回收站" else if(it.remotePageCount!=null && it.pages.size<it.remotePageCount) "已存 ${it.pages.size}/${it.remotePageCount} 页 · 待补全" else "已存 ${it.pages.size} 页"},Modifier.weight(1f)) {open(entry)}
                                     }
-                                    LessonCard(entry,shownFresh,material?.let {if(it.deleted) "在回收站" else if(it.remotePageCount!=null && it.pages.size<it.remotePageCount) "已存 ${it.pages.size}/${it.remotePageCount} 页 · 待补全" else "已存 ${it.pages.size} 页"},Modifier.weight(1f)) {open(entry)}
                                 }
                             }
                         }

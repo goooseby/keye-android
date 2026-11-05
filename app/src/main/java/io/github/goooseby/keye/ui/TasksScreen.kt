@@ -19,6 +19,7 @@ import io.github.goooseby.keye.data.taskQueueOrder
 import io.github.goooseby.keye.ui.components.AppIcon
 import io.github.goooseby.keye.ui.components.EmptyState
 import io.github.goooseby.keye.ui.components.IconBadge
+import io.github.goooseby.keye.ui.components.PageMotion
 import io.github.goooseby.keye.ui.components.PillTabs
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -27,10 +28,15 @@ import java.util.Locale
 @Composable
 fun TasksScreen(tasks: List<TaskRecord>,model: KeyeViewModel,onOpen: (String) -> Unit,onOutput: (String) -> Unit) {
     var filter by rememberSaveable{mutableIntStateOf(0)}
-    val visible=tasks.filter{when(filter){1 ->it.status in setOf("queued","running");2 ->it.status in setOf("failed","cancelled");else ->true}}.sortedWith(taskQueueOrder)
     Column(Modifier.fillMaxSize()) {
         PillTabs(listOf("全部","进行中","未完成"),filter,{filter=it},Modifier.padding(horizontal=20.dp,vertical=4.dp))
-        key(filter) {AnimatedTaskQueue(visible,tasks,model,onOpen,onOutput,when(filter){1 ->"没有进行中的任务";2 ->"没有未完成任务";else ->"暂无任务"})}
+        AnimatedContent(filter,modifier=Modifier.weight(1f),
+            transitionSpec={PageMotion.between(0,0,0).using(null)},label="task filter") {shownFilter ->
+            val visible=remember(tasks,shownFilter) {
+                tasks.filter {when(shownFilter){1 ->it.status in setOf("queued","running");2 ->it.status in setOf("failed","cancelled");else ->true}}.sortedWith(taskQueueOrder)
+            }
+            AnimatedTaskQueue(visible,tasks,model,onOpen,onOutput,when(shownFilter){1 ->"没有进行中的任务";2 ->"没有未完成任务";else ->"暂无任务"})
+        }
     }
 }
 

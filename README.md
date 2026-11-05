@@ -2,7 +2,7 @@
 
 原生 Android 课程课件阅读应用，使用 Kotlin 和 Jetpack Compose。围绕获取课件、离线阅读、继续阅读和导出分享设计，最低支持 Android 8.0（API 26）。
 
-当前版本为 **0.3.0**。[下载安装包](https://github.com/goooseby/keye-android/releases/latest/download/keye-android.apk) · [发布记录](https://github.com/goooseby/keye-android/releases)。课程内容以 PDF 或图片阅读，不直接解析 PPT／PPTX 文件，也不支持幻灯片动画。
+当前版本为 **0.3.1**。[下载安装包](https://github.com/goooseby/keye-android/releases/latest/download/keye-android.apk) · [发布记录](https://github.com/goooseby/keye-android/releases)。课程内容以 PDF 或图片阅读，不直接解析 PPT／PPTX 文件，也不支持幻灯片动画。
 
 ## 功能
 

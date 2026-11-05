@@ -51,6 +51,7 @@ import io.github.goooseby.keye.domain.retainedPageIndices
 import io.github.goooseby.keye.domain.visiblePositionForPage
 import io.github.goooseby.keye.export.ExportFeedback
 import io.github.goooseby.keye.export.ExportState
+import io.github.goooseby.keye.ui.components.LocalPageActive
 import io.github.goooseby.keye.ui.components.AppIcon
 import io.github.goooseby.keye.ui.components.EmptyHint
 import io.github.goooseby.keye.ui.components.EmptyState
@@ -66,6 +67,7 @@ import kotlinx.coroutines.flow.*
 @Composable
 fun ReaderScreen(material: StudyMaterial,model: KeyeViewModel,mediaPath: (String) -> File,onBack: () -> Unit,onExport: () -> Unit,onShare: () -> Unit,exportState: ExportState?,onClassroom: ((ScheduleEntry)->Unit)?=null) {
     if(material.pages.isEmpty()) { EmptyState("error","课件没有可读取的页面",action="返回",onAction=onBack);return }
+    val pageActive=LocalPageActive.current
     val context=LocalContext.current
     val activity=context as Activity
     val prefs=remember {context.getSharedPreferences("reading",Context.MODE_PRIVATE)}
@@ -149,7 +151,8 @@ fun ReaderScreen(material: StudyMaterial,model: KeyeViewModel,mediaPath: (String
         pendingOffset=0
     }
     BackHandler {if(fullscreen) setFull(false) else onBack()}
-    DisposableEffect(fullscreen) {
+    DisposableEffect(pageActive,fullscreen) {
+        if(!pageActive) return@DisposableEffect onDispose {}
         activity.requestedOrientation=if(fullscreen) ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         val controller=WindowCompat.getInsetsController(activity.window,activity.window.decorView)
         controller.systemBarsBehavior=WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
@@ -161,12 +164,14 @@ fun ReaderScreen(material: StudyMaterial,model: KeyeViewModel,mediaPath: (String
             }
         }
     }
-    DisposableEffect(readingBrightness) {
+    DisposableEffect(pageActive,readingBrightness) {
+        if(!pageActive) return@DisposableEffect onDispose {}
         val previous=activity.window.attributes.screenBrightness
         activity.window.attributes=activity.window.attributes.apply {screenBrightness=readingBrightness}
         onDispose {activity.window.attributes=activity.window.attributes.apply {screenBrightness=previous}}
     }
-    DisposableEffect(keepAwake,fullscreen) {
+    DisposableEffect(pageActive,keepAwake,fullscreen) {
+        if(!pageActive) return@DisposableEffect onDispose {}
         if(keepAwake||fullscreen) activity.window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         onDispose {activity.window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)}
     }
@@ -182,7 +187,8 @@ fun ReaderScreen(material: StudyMaterial,model: KeyeViewModel,mediaPath: (String
         }
         restored=true
     }
-    LaunchedEffect(effectiveMode,visibleIndices) {
+    LaunchedEffect(pageActive,effectiveMode,visibleIndices) {
+        if(!pageActive) return@LaunchedEffect
         snapshotFlow {restored}.first {it}
         targetOnSwitch?.let {original ->
             val position=visiblePositionForPage(visibleIndices,original)

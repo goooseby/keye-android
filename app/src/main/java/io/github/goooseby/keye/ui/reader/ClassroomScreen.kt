@@ -40,6 +40,7 @@ import io.github.goooseby.keye.domain.retainedPageIndices
 import io.github.goooseby.keye.domain.visiblePositionForPage
 import io.github.goooseby.keye.export.ExportFeedback
 import io.github.goooseby.keye.export.ExportSheet
+import io.github.goooseby.keye.ui.components.LocalPageActive
 import io.github.goooseby.keye.ui.components.AppIcon
 import io.github.goooseby.keye.ui.components.EmptyState
 import io.github.goooseby.keye.ui.components.PageImage
@@ -58,6 +59,7 @@ import kotlinx.coroutines.flow.*
 @Composable
 fun ClassroomScreen(session: ClassroomSession,material: StudyMaterial?,state: UiState,model: KeyeViewModel,
                     mediaPath: (String)->File,onBack: ()->Unit,onLogin: ()->Unit) {
+    val pageActive=LocalPageActive.current
     val context=LocalContext.current
     val activity=context as Activity
     val owner=LocalLifecycleOwner.current
@@ -107,7 +109,8 @@ fun ClassroomScreen(session: ClassroomSession,material: StudyMaterial?,state: Ui
     }
     fun setFull(value: Boolean) {fullscreen=value;chrome=true;panel=null;resetToken++;zoomed=false;controlTick++}
     BackHandler {if(fullscreen) setFull(false) else onBack()}
-    DisposableEffect(owner,session.entry.id) {
+    DisposableEffect(pageActive,owner,session.entry.id) {
+        if(!pageActive) return@DisposableEffect onDispose {}
         val observer=LifecycleEventObserver {_,event ->
             if(event==Lifecycle.Event.ON_RESUME) model.setClassroomForeground(true)
             if(event==Lifecycle.Event.ON_PAUSE) model.setClassroomForeground(false)
@@ -116,7 +119,8 @@ fun ClassroomScreen(session: ClassroomSession,material: StudyMaterial?,state: Ui
         model.setClassroomForeground(owner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
         onDispose {owner.lifecycle.removeObserver(observer);model.setClassroomForeground(false)}
     }
-    DisposableEffect(fullscreen) {
+    DisposableEffect(pageActive,fullscreen) {
+        if(!pageActive) return@DisposableEffect onDispose {}
         activity.requestedOrientation=if(fullscreen) ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         val bars=WindowCompat.getInsetsController(activity.window,activity.window.decorView)
         bars.systemBarsBehavior=WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
@@ -136,7 +140,8 @@ fun ClassroomScreen(session: ClassroomSession,material: StudyMaterial?,state: Ui
         }
     }
     LaunchedEffect(current,count) {if(count>0 && current==count-1) seenCount=session.remoteCount}
-    LaunchedEffect(session.materialId) {
+    LaunchedEffect(pageActive,session.materialId) {
+        if(!pageActive) return@LaunchedEffect
         snapshotFlow {pager.settledPage to latestCount}.distinctUntilChanged().debounce(250).collect {(page,_) ->
             val id=session.materialId
             if(id!=null) latestIndices.getOrNull(page)?.let {model.lastPage(id,it+1,source=latestMaterial?.pages?.getOrNull(it)?.source)}
@@ -151,7 +156,7 @@ fun ClassroomScreen(session: ClassroomSession,material: StudyMaterial?,state: Ui
         if(fullscreen && output?.result?.mime=="image/png") snackbar.showSnackbar("当前页已保存到 ${output.result.location}")
         else if(fullscreen && output?.failed==true) snackbar.showSnackbar(output.message)
     }
-    LaunchedEffect(state.notice) {state.notice?.let {snackbar.showSnackbar(it);if(model.state.value.notice==it) model.notice(null)}}
+    LaunchedEffect(pageActive,state.notice) {if(pageActive) state.notice?.let {snackbar.showSnackbar(it);if(model.state.value.notice==it) model.notice(null)}}
     Column(Modifier.fillMaxSize().background(if(fullscreen) Color.Black else MaterialTheme.colorScheme.surfaceContainer)) {
         if(!fullscreen) Surface {
             Column(Modifier.statusBarsPadding()) {
