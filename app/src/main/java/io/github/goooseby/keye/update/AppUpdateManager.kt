@@ -121,7 +121,7 @@ internal class AppUpdateManager(private val context: Context) {
         val target=downloadedFile(release)
         if(target.exists()) check(target.delete()) {"无法清理不完整的安装包"}
         val request=DownloadManager.Request(Uri.parse(release.url))
-            .setTitle("课页 ${release.version}").setDescription("正在下载应用更新")
+            .setTitle("华工课栈 ${release.version}").setDescription("正在下载应用更新")
             .setMimeType("application/vnd.android.package-archive")
             .setAllowedOverMetered(true).setAllowedOverRoaming(false)
             .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE)
@@ -208,7 +208,7 @@ internal class AppUpdateManager(private val context: Context) {
         val hash=digest.digest().joinToString("") {"%02x".format(it.toInt() and 0xff)}
         require(hash==release.sha256) {"安装包校验失败，请重新下载"}
         val candidate=packages.getPackageArchiveInfo(file.path,signingFlags()) ?: error("安装包无法解析")
-        if(candidate.packageName!=context.packageName) throw UpdatePackageIncompatible("安装包不属于课页，已停止安装")
+        if(candidate.packageName!=context.packageName) throw UpdatePackageIncompatible("安装包不属于华工课栈，已停止安装")
         if(candidate.versionName!=release.version || versionCode(candidate)<=currentCode) throw UpdatePackageIncompatible("安装包版本不符合更新要求")
         if(candidate.applicationInfo?.minSdkVersion?.let {it<=Build.VERSION.SDK_INT}!=true) throw UpdatePackageIncompatible("该版本不支持当前 Android 系统")
         if(!matchingUpdateSigners(signers(installed),signers(candidate))) throw UpdatePackageIncompatible("安装包签名与当前应用不一致，无法覆盖安装")

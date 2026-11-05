@@ -34,7 +34,7 @@ class UpdateDownloadReceiver: BroadcastReceiver() {
             val open=Intent(context,MainActivity::class.java).setAction(UPDATE_ACTION).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             val pending=PendingIntent.getActivity(context,UPDATE_NOTIFICATION_ID,open,PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
             manager.notify(UPDATE_NOTIFICATION_ID,NotificationCompat.Builder(context,"app_updates")
-                .setSmallIcon(R.drawable.ic_update_notification).setContentTitle("课页更新已下载")
+                .setSmallIcon(R.drawable.ic_update_notification).setContentTitle("华工课栈更新已下载")
                 .setContentText("点击校验并安装，无需重新下载").setContentIntent(pending).setAutoCancel(true).build())
             prefs.edit().putLong("notified_download_id",id).apply()
         } catch(_: Exception) { /* The next foreground refresh can still recover it. */ }

@@ -125,4 +125,4 @@ jobs:
         run: |
           gh release create "$TAG" dist/keye-android.apk dist/SHA256SUMS \
             --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
-            --title "Keye $TAG" --notes-file dist/release-notes.md --draft
+            --title "SCUT Slides $TAG" --notes-file dist/release-notes.md --draft

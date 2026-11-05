@@ -1,7 +1,5 @@
-<vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
-<path android:fillColor="#163D30" android:pathData="M34,28h36a7,7 0,0 1,7 7v43a7,7 0,0 1,-7 7h-36a7,7 0,0 1,-7 -7v-43a7,7 0,0 1,7 -7z" />
-<path android:fillColor="#F7FAF4" android:pathData="M38,23h22l17,17v35a7,7 0,0 1,-7 7h-32a7,7 0,0 1,-7 -7v-45a7,7 0,0 1,7 -7z" />
-<path android:fillColor="#C5DACD" android:pathData="M60,23v11a6,6 0,0 0,6 6h11z" />
-<path android:strokeColor="#326C53" android:strokeWidth="3.5" android:strokeLineCap="round" android:pathData="M42,49h22 M42,59h22 M42,69h12" />
-<path android:fillColor="#BD9C64" android:pathData="M62,62h9v22l-4.5,-3 -4.5,3z" />
-</vector>
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Full artwork fits in a 60dp square within the 108dp adaptive layer. -->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/ic_launcher_artwork"
+    android:inset="24dp" />

@@ -44,7 +44,7 @@ internal fun AppUpdateHost(model: AppUpdateViewModel,canPrompt: Boolean) {
     val allowInteraction=canPrompt || state.panelOpen || permissionDialog
     val installPermission=rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         if(context.packageManager.canRequestPackageInstalls()) model.requestInstall()
-        else model.installError("尚未允许课页安装更新；安装包已保留，可以稍后继续")
+        else model.installError("尚未允许华工课栈安装更新；安装包已保留，可以稍后继续")
     }
     val notificationPermission=rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {model.startDownload()}
     fun download() {
@@ -74,7 +74,7 @@ internal fun AppUpdateHost(model: AppUpdateViewModel,canPrompt: Boolean) {
     }
     if(canPrompt && resumed && state.prompt && !state.panelOpen) {
         LaunchedEffect(state.release?.version) {model.markPromptShown()}
-        AlertDialog(onDismissRequest=model::dismiss,icon={AppIcon("download")},title={Text("发现课页 ${state.release?.version}")},text={
+        AlertDialog(onDismissRequest=model::dismiss,icon={AppIcon("download")},title={Text("发现华工课栈 ${state.release?.version}")},text={
             Column(Modifier.heightIn(max=280.dp).verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(12.dp)) {
                 state.release?.let {release ->
                     Text(release.notes.ifBlank {"此版本提供功能改进与问题修复。"},style=MaterialTheme.typography.bodyMedium)
@@ -95,7 +95,7 @@ internal fun AppUpdateHost(model: AppUpdateViewModel,canPrompt: Boolean) {
             Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(12.dp)) {
                 IconBadge("refresh")
                 Column(Modifier.weight(1f)) {
-                    Text("课页 ${state.version}",style=MaterialTheme.typography.titleMedium)
+                    Text("华工课栈 ${state.version}",style=MaterialTheme.typography.titleMedium)
                     Text("GitHub Releases",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 TextButton(onClick={model.check()},enabled=!state.checking) {Text(if(state.checking) "检查中" else "检查更新")}
@@ -142,10 +142,10 @@ internal fun AppUpdateHost(model: AppUpdateViewModel,canPrompt: Boolean) {
             TextButton(onClick={runCatching {context.startActivity(Intent(Intent.ACTION_VIEW,Uri.parse("https://github.com/$UPDATE_REPOSITORY/releases")))}.onFailure {model.installError("无法打开浏览器")}}) {Text("在 GitHub 查看发布记录")}
         }
     }
-    if(allowInteraction && resumed && permissionDialog) AlertDialog(onDismissRequest={permissionDialog=false},title={Text("允许安装课页更新")},text={Text("需要在系统设置中允许课页安装应用。返回后会继续打开安装确认；不会自动确认安装，安装包也会保留。")},confirmButton={TextButton(onClick={
+    if(allowInteraction && resumed && permissionDialog) AlertDialog(onDismissRequest={permissionDialog=false},title={Text("允许安装华工课栈更新")},text={Text("需要在系统设置中允许华工课栈安装应用。返回后会继续打开安装确认；不会自动确认安装，安装包也会保留。")},confirmButton={TextButton(onClick={
         permissionDialog=false
         runCatching {installPermission.launch(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,Uri.parse("package:${context.packageName}")))}
-            .onFailure {model.installError("无法打开安装权限设置，请在系统设置中允许课页安装应用")}
+            .onFailure {model.installError("无法打开安装权限设置，请在系统设置中允许华工课栈安装应用")}
     }) {Text("前往设置")}},dismissButton={TextButton(onClick={permissionDialog=false}) {Text("稍后")}})
 }
 

@@ -74,7 +74,7 @@ fun SettingsScreen(state: UiState,model: KeyeViewModel,onLogin: () -> Unit,onTas
                 Column {
                     PreferenceRow("refresh","应用更新",subtitle=updateStatus?:"当前版本 $currentVersion",compact=true,onClick=onUpdates)
                     HorizontalDivider(Modifier.padding(start=62.dp),color=MaterialTheme.colorScheme.outlineVariant.copy(alpha=.5f))
-                    PreferenceRow("code","GitHub · Keye","代码公开，欢迎探索和改进",compact=true,onClick={
+                    PreferenceRow("code","GitHub · SCUT Slides","代码公开，欢迎探索和改进",compact=true,onClick={
                         runCatching {context.startActivity(Intent(Intent.ACTION_VIEW,Uri.parse("https://github.com/goooseby/keye-android")))}
                             .onFailure {model.notice("暂时无法打开浏览器")}
                     })
