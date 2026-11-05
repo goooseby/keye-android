@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Full artwork fits in a 60dp square within the 108dp adaptive layer. -->
-<inset xmlns:android="http://schemas.android.com/apk/res/android"
-    android:drawable="@drawable/ic_launcher_artwork"
-    android:inset="24dp" />
+<!-- Fill the adaptive layer with the original artwork; the system owns cropping. -->
+<bitmap xmlns:android="http://schemas.android.com/apk/res/android"
+    android:src="@drawable/ic_launcher_artwork"
+    android:gravity="fill" />
