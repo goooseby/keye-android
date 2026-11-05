@@ -40,6 +40,10 @@ class UiGalleryActivity: ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState);enableEdgeToEdge()
         val page=intent.getStringExtra("page")?:"library"
+        if(page=="launcher-icons") {
+            setContentView(LauncherIconPreview(this))
+            return
+        }
         setContent {KeyeTheme {
             val model: KeyeViewModel=viewModel()
             val actual by model.state.collectAsState()

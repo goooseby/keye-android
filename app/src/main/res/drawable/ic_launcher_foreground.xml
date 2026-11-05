@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Fill the adaptive layer with the original artwork; the system owns cropping. -->
-<bitmap xmlns:android="http://schemas.android.com/apk/res/android"
-    android:src="@drawable/ic_launcher_artwork"
-    android:gravity="fill" />
+<!-- Compensate for Android's 108/72 adaptive layer overscan so the complete artwork
+     fills the visible bounds. Proportional sizing stays consistent in launchers and Settings;
+     the system mask clips corners without zooming into the artwork. -->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:inset="16.666667%">
+    <bitmap
+        android:src="@drawable/ic_launcher_artwork"
+        android:gravity="fill" />
+</inset>
