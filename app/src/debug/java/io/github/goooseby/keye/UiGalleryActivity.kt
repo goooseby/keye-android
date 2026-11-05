@@ -29,12 +29,24 @@ import java.io.File
 
 /** Debug-only visual fixtures; this activity is absent from release builds. */
 class UiGalleryActivity: ComponentActivity() {
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        if(intent.getStringExtra("command")=="stop-login-renderer" && android.os.Build.VERSION.SDK_INT>=29) {
+            fun find(view: android.view.View): android.webkit.WebView? = if(view is android.webkit.WebView) view
+                else (view as? android.view.ViewGroup)?.let {group ->(0 until group.childCount).firstNotNullOfOrNull {find(group.getChildAt(it))}}
+            find(window.decorView)?.webViewRenderProcess?.terminate()
+        }
+    }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState);enableEdgeToEdge()
         val page=intent.getStringExtra("page")?:"library"
         setContent {KeyeTheme {
             val model: KeyeViewModel=viewModel()
             val actual by model.state.collectAsState()
+            if(page=="login-error") {
+                io.github.goooseby.keye.ui.SchoolLoginScreen(model,{finish()},initialPage=intent.getStringExtra("url") ?: "https://127.0.0.1:1/",verifySession=false)
+                return@KeyeTheme
+            }
             if(page=="offline-timetable") {
                 // Real persisted data, deliberately without authenticating or changing WebView cookies.
                 var opened by remember {mutableStateOf<String?>(null)}

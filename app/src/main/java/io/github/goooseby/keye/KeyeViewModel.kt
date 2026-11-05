@@ -42,6 +42,7 @@ import io.github.goooseby.keye.network.SchoolAuth
 import io.github.goooseby.keye.network.SchoolConnection
 import io.github.goooseby.keye.network.SchoolRateLimited
 import io.github.goooseby.keye.network.SchoolSessionExpired
+import io.github.goooseby.keye.network.SchoolLoginResult
 import io.github.goooseby.keye.network.hasSchoolLoginCookie
 import java.io.File
 import java.time.LocalDate
@@ -100,6 +101,7 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
     private val school = SchoolApi()
     @Volatile private var auth: SchoolAuth? = null
     private var sessionJob: Job? = null
+    @Volatile private var manualLoginInProgress=false
     private val sessionSequence=java.util.concurrent.atomic.AtomicLong()
     @Volatile private var lastSessionCheck=0L
     @Volatile private var rejectedCookie:String?=null
@@ -195,40 +197,45 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
         mutableState.update { it.copy(notice = message) }
     }
 
-    suspend fun login(cookie: String,silent: Boolean=false): Boolean {
-        val credentials=SchoolApi.authFromCookies(cookie)
-        if(credentials==null) {
-            if(!silent) notice("还没有识别到有效登录状态，请在学校页面完成登录")
-            return false
-        }
+    suspend fun login(cookie: String): SchoolLoginResult {
+        val credentials=SchoolApi.authFromCookies(cookie) ?: return SchoolLoginResult.NeedsLogin
+        if(manualLoginInProgress) return SchoolLoginResult.Superseded
+        manualLoginInProgress=true
+        val previousConnection=state.value.schoolConnection
         sessionJob?.cancel()
         val sequence=sessionSequence.incrementAndGet()
+        clearTimetable()
         mutableState.update {it.copy(schoolConnection=SchoolConnection.Checking)}
         return try {
             withContext(Dispatchers.IO) {school.verifySession(credentials,state.value.settings.timeoutSeconds.coerceAtMost(15))}
-            if(sequence!=sessionSequence.get()) return false
+            if(sequence!=sessionSequence.get()) return SchoolLoginResult.Superseded
             activateTimetableAccount(credentials)
             auth=credentials;rejectedCookie=null
             lastSessionCheck=android.os.SystemClock.elapsedRealtime()
             android.webkit.CookieManager.getInstance().flush()
-            mutableState.update {it.copy(loggedIn=true,schoolConnection=SchoolConnection.Connected,notice=if(silent) null else "已连接学校课堂平台")}
+            mutableState.update {it.copy(loggedIn=true,schoolConnection=SchoolConnection.Connected,notice="已连接学校课堂平台")}
             loadTimetableWeek(schoolWeek(schoolToday()).toString())
-            true
-        } catch(error: CancellationException) {throw error}
-        catch(error: Exception) {
-            if(sequence==sessionSequence.get()) {
-                if(error is SchoolSessionExpired) {
-                    rejectedCookie=credentials.cookie;clearTimetable();auth=null
-                    mutableState.update {it.copy(loggedIn=false,schoolConnection=SchoolConnection.Expired,schedule=emptyList(),busy=false)}
-                } else mutableState.update {it.copy(schoolConnection=SchoolConnection.Unverified)}
-                if(!silent) notice(error.message ?: "暂时无法验证登录，请稍后重试")
+            SchoolLoginResult.Connected
+        } catch(error: CancellationException) {
+            if(sequence==sessionSequence.get()) mutableState.update {it.copy(schoolConnection=
+                if(previousConnection==SchoolConnection.Checking) SchoolConnection.Unverified else previousConnection)}
+            throw error
+        } catch(error: Exception) {
+            if(sequence!=sessionSequence.get()) return SchoolLoginResult.Superseded
+            if(error is SchoolSessionExpired) {
+                rejectedCookie=credentials.cookie;clearTimetable();auth=null
+                mutableState.update {it.copy(loggedIn=false,schoolConnection=SchoolConnection.Expired,schedule=emptyList(),busy=false)}
+                SchoolLoginResult.NeedsLogin
+            } else {
+                mutableState.update {it.copy(schoolConnection=SchoolConnection.Unverified)}
+                SchoolLoginResult.Retryable(error.message ?: "暂时无法验证登录，请稍后重试",
+                    (error as? SchoolRateLimited)?.retryAfterSeconds?.times(1000) ?: 5_000)
             }
-            false
-        }
+        } finally {manualLoginInProgress=false}
     }
 
     fun checkSchoolSession(cookie: String?,force: Boolean=false) {
-        if(sessionJob?.isActive==true) return
+        if(manualLoginInProgress || sessionJob?.isActive==true) return
         val credentials=SchoolApi.authFromCookies(cookie)
         if(credentials==null) {
             if(auth!=null || hasSchoolLoginCookie(cookie)) {

@@ -8,7 +8,6 @@ import io.github.goooseby.keye.domain.classroomPageKey
 import io.github.goooseby.keye.domain.scheduleTimestamp
 import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
-import java.net.Proxy
 import java.net.URL
 import java.net.URLDecoder
 import java.security.MessageDigest
@@ -67,7 +66,7 @@ class SchoolApi {
     private fun connect(url: String, auth: SchoolAuth?, timeoutSeconds: Int): HttpURLConnection {
         val parsed = URL(url)
         require(parsed.protocol == "https") { "只允许 HTTPS 下载" }
-        val connection = parsed.openConnection(Proxy.NO_PROXY) as HttpURLConnection
+        val connection = parsed.openConnection() as HttpURLConnection
         connection.connectTimeout = timeoutSeconds * 1000
         connection.readTimeout = timeoutSeconds * 1000
         connection.instanceFollowRedirects = false

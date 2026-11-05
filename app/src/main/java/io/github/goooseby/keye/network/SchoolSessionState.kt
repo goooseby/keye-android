@@ -24,3 +24,19 @@ internal fun isSchoolAuthenticationFailure(host: String,status: Int,location: St
 internal fun hasSchoolLoginCookie(cookie: String?): Boolean = cookie.orEmpty().split(';').any {
     it.substringBefore('=').trim() in setOf("JWTUser","_token")
 }
+
+sealed interface SchoolLoginResult {
+    data object Connected: SchoolLoginResult
+    data object NeedsLogin: SchoolLoginResult
+    data object Superseded: SchoolLoginResult
+    data class Retryable(val message: String,val retryAfterMillis: Long=5_000): SchoolLoginResult
+}
+
+/** Initial attempt plus two retries; manual retry or changed cookies starts a new cycle. */
+internal fun loginVerificationRetryDelay(failures: Int): Long? = when(failures) {
+    1 ->5_000L;2 ->15_000L;else ->null
+}
+
+/** Ignore fragment navigation, but never let a stale request replace a newer document. */
+internal fun sameLoginDocument(callback: String?,current: String?): Boolean =
+    !callback.isNullOrBlank() && !current.isNullOrBlank() && callback.substringBefore('#')==current.substringBefore('#')

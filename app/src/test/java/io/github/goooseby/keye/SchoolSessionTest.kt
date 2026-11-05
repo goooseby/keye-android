@@ -28,4 +28,17 @@ class SchoolSessionTest {
         assertFalse(isSchoolAuthenticationFailure("video.jw.scut.edu.cn",302,"/maintenance"))
         assertFalse(isSchoolAuthenticationFailure("video.jw.scut.edu.cn",302))
     }
+
+    @Test fun loginVerificationRetriesAreBounded() {
+        assertEquals(5_000L,io.github.goooseby.keye.network.loginVerificationRetryDelay(1))
+        assertEquals(15_000L,io.github.goooseby.keye.network.loginVerificationRetryDelay(2))
+        assertNull(io.github.goooseby.keye.network.loginVerificationRetryDelay(3))
+        assertNull(io.github.goooseby.keye.network.loginVerificationRetryDelay(4))
+    }
+    @Test fun loginCallbacksMustBelongToTheCurrentDocument() {
+        assertTrue(io.github.goooseby.keye.network.sameLoginDocument("https://sso.example.edu/login#one","https://sso.example.edu/login#two"))
+        assertFalse(io.github.goooseby.keye.network.sameLoginDocument("https://video.jw.scut.edu.cn/","https://sso.example.edu/login"))
+        assertFalse(io.github.goooseby.keye.network.sameLoginDocument("https://sso.example.edu/login?step=1","https://sso.example.edu/login?step=2"))
+        assertFalse(io.github.goooseby.keye.network.sameLoginDocument(null,"https://sso.example.edu/login"))
+    }
 }
