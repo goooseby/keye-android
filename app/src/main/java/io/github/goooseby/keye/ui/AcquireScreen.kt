@@ -22,7 +22,6 @@ import io.github.goooseby.keye.KeyeViewModel
 import io.github.goooseby.keye.UiState
 import io.github.goooseby.keye.data.ScheduleEntry
 import io.github.goooseby.keye.domain.ClassroomStage
-import io.github.goooseby.keye.domain.isInProgress
 import io.github.goooseby.keye.domain.semesterStart
 import io.github.goooseby.keye.network.SchoolApi
 import io.github.goooseby.keye.network.SchoolConnection

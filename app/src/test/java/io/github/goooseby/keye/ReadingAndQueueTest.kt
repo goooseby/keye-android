@@ -1,6 +1,5 @@
 package io.github.goooseby.keye
 
-import io.github.goooseby.keye.data.Course
 import io.github.goooseby.keye.data.PageFile
 import io.github.goooseby.keye.data.StudyMaterial
 import io.github.goooseby.keye.data.TaskRecord
@@ -30,13 +29,6 @@ class ReadingAndQueueTest {
         val merged=mergeTaskBatch(batch.take(3),batch)
         assertEquals(9,merged.size)
         assertEquals(batch.map {it.id},merged.map {it.id})
-    }
-
-    @Test fun completingSomeTasksKeepsSurvivorsInTheirQueuePositions() {
-        val batch=(0 until 9).map {TaskRecord(id="task-$it",type="download",title="Course",createdAt=1000,batchOrder=it)}
-        val completed=setOf("task-0","task-3","task-7")
-        val updated=batch.map {if(it.id in completed) it.copy(status="done",updatedAt=99999) else it}
-        assertEquals(batch.filter {it.id !in completed}.map {it.id},updated.filter {it.status!="done"}.sortedWith(taskQueueOrder).map {it.id})
     }
 
     @Test fun removingTheCurrentPageChoosesNextAndRemovingLastChoosesPrevious() {

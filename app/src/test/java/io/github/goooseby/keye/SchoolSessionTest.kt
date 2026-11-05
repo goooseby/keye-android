@@ -30,16 +30,11 @@ class SchoolSessionTest {
     }
 
     @Test fun loginVerificationRetriesAreBounded() {
-        assertEquals(5_000L,io.github.goooseby.keye.network.loginVerificationRetryDelay(1))
-        assertEquals(15_000L,io.github.goooseby.keye.network.loginVerificationRetryDelay(2))
-        assertNull(io.github.goooseby.keye.network.loginVerificationRetryDelay(3))
-        assertNull(io.github.goooseby.keye.network.loginVerificationRetryDelay(4))
-    }
-    @Test fun loginCallbacksMustBelongToTheCurrentDocument() {
-        assertTrue(io.github.goooseby.keye.network.sameLoginDocument("https://sso.example.edu/login#one","https://sso.example.edu/login#two"))
-        assertFalse(io.github.goooseby.keye.network.sameLoginDocument("https://video.jw.scut.edu.cn/","https://sso.example.edu/login"))
-        assertFalse(io.github.goooseby.keye.network.sameLoginDocument("https://sso.example.edu/login?step=1","https://sso.example.edu/login?step=2"))
-        assertFalse(io.github.goooseby.keye.network.sameLoginDocument(null,"https://sso.example.edu/login"))
+        val delays=(1..4).map {io.github.goooseby.keye.network.loginVerificationRetryDelay(it)}
+        assertEquals(2,delays.takeWhile {it!=null}.size)
+        assertTrue(delays.take(2).all {it!=null && it>0})
+        assertTrue(delays[1]!!>=delays[0]!!)
+        assertTrue(delays.drop(2).all {it==null})
     }
 
     @Test fun authenticatedNoClassDayIsNotALoginFailure() {

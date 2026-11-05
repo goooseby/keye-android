@@ -19,10 +19,6 @@ internal fun scheduleTimestamp(value: String): Long? {
     return runCatching {Instant.parse(value).toEpochMilli()}.getOrNull()
 }
 
-internal fun ScheduleEntry.isInProgress(now: Long): Boolean =
-    startsAt!=null && endsAt!=null && endsAt>startsAt && now>=startsAt && now<endsAt
-
-
 internal val schoolZone: java.time.ZoneId = java.time.ZoneId.of("Asia/Shanghai")
 internal fun schoolToday(): LocalDate = LocalDate.now(schoolZone)
 internal fun schoolWeek(date: LocalDate): LocalDate = date.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
@@ -37,8 +33,8 @@ internal fun schoolLessonVisible(entry: ScheduleEntry,isAdmin: Boolean=false): B
 }
 internal fun lessonTime(epoch: Long?): String = epoch?.let {java.time.format.DateTimeFormatter.ofPattern("HH:mm").withZone(schoolZone).format(Instant.ofEpochMilli(it))} ?: "时间待定"
 
-/** Assign the smallest free column, sharing widths only within overlapping clusters. */
-internal data class LessonPlacement(val entry: ScheduleEntry,val startMinute: Int,val endMinute: Int,val column: Int,val columns: Int,val group: Int=0)
+/** Group overlapping display blocks per day, including their minimum touch height. */
+internal data class LessonPlacement(val entry: ScheduleEntry,val startMinute: Int,val endMinute: Int,val group: Int)
 internal fun placeLessons(entries: List<ScheduleEntry>): List<LessonPlacement> = entries.groupBy {it.day}.values.flatMap {placeDayLessons(it)}
 
 private fun placeDayLessons(entries: List<ScheduleEntry>): List<LessonPlacement> {
@@ -47,16 +43,12 @@ private fun placeDayLessons(entries: List<ScheduleEntry>): List<LessonPlacement>
         val end=entry.endsAt?.let {Instant.ofEpochMilli(it).atZone(schoolZone).toLocalTime().toSecondOfDay()/60} ?: return@mapNotNull null
         if(end<=start) null else Triple(entry,start,end)
     }.sortedBy {it.second}
-    val result=mutableListOf<LessonPlacement>();val cluster=mutableListOf<LessonPlacement>();val ends=mutableListOf<Int>();var clusterEnd=-1;var group=0
-    fun flush() {val width=ends.size;result+=cluster.map {it.copy(columns=width,group=group)};group++;cluster.clear();ends.clear()}
+    val result=mutableListOf<LessonPlacement>();var clusterEnd=-1;var group=-1
     for((entry,start,end) in sorted) {
-        if(cluster.isNotEmpty() && start>=clusterEnd) flush()
-        val slot=ends.indexOfFirst {it<=start}.let {if(it<0) ends.size else it}
-        val visualEnd=maxOf(end,start+48)
-        if(slot==ends.size) ends.add(visualEnd) else ends[slot]=visualEnd
-        cluster+=LessonPlacement(entry,start,end,slot,1);clusterEnd=if(cluster.size==1) visualEnd else maxOf(clusterEnd,visualEnd)
+        if(start>=clusterEnd) group++
+        result+=LessonPlacement(entry,start,end,group)
+        clusterEnd=maxOf(clusterEnd,maxOf(end,start+48))
     }
-    if(cluster.isNotEmpty()) flush()
     return result
 }
 

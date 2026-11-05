@@ -9,7 +9,6 @@ import io.github.goooseby.keye.domain.classroomPageKey
 import io.github.goooseby.keye.domain.classroomRetryMillis
 import io.github.goooseby.keye.domain.classroomUnseenPages
 import io.github.goooseby.keye.domain.pendingClassroomPages
-import io.github.goooseby.keye.domain.selectExportPages
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -41,14 +40,6 @@ class ClassroomPolicyTest {
         assertEquals(10000L,classroomRetryMillis(1,10))
         assertEquals(30000L,classroomRetryMillis(100,3))
     }
-    @Test fun snapshotsKeepTheAlreadyCapturedPagesAndNotes() {
-        val first=StudyMaterial(sourceKey="class",title="class",day="2026-11-03",kind="images",pages=listOf(PageFile("1","p1")),pageNotes=mapOf(1 to "note"))
-        val grown=first.copy(pages=first.pages+PageFile("2","p2"),pageNotes=first.pageNotes+(2 to "next note"))
-        assertEquals(1,first.pages.size)
-        assertEquals(mapOf(1 to "note"),first.pageNotes)
-        assertEquals(2,grown.pages.size)
-        assertEquals(setOf(1),selectExportPages(listOf(grown),setOf(1))[grown.id])
-    }
     @Test fun partialLiveCaptureCanBeBackfilledWithoutLosingPageBoundData() {
         val catalog=(1..6).map {ClassroomPage("$it","url-$it")}
         var partial=StudyMaterial(sourceKey="lesson",title="lesson",day="day",kind="images",
@@ -65,4 +56,19 @@ class ClassroomPolicyTest {
         assertEquals(listOf("7"),pendingClassroomPages(partial.pages.mapNotNull {it.remoteKey}.toSet(),catalog+ClassroomPage("7","url-7")).map {it.key})
     }
 
+    @Test fun latestFirstBackfillKeepsOrderAndMovesNotesWithTheirPage() {
+        val catalog=(1..5).map {ClassroomPage("$it","https://example.edu/$it")}
+        var material=StudyMaterial(sourceKey="id",title="name",day="day",kind="images",pages=emptyList())
+        material=insertClassroomPage(material,PageFile("5","5",remoteKey="5"),catalog)
+            .copy(pageNotes=mapOf(1 to "latest note"),bookmarks=setOf(1),excluded=setOf(1))
+        for(n in 4 downTo 1) material=insertClassroomPage(material,PageFile("$n","$n",remoteKey="$n"),catalog)
+        assertEquals(listOf("1","2","3","4","5"),material.pages.map {it.source})
+        assertEquals(mapOf(5 to "latest note"),material.pageNotes)
+        assertEquals(setOf(5),material.bookmarks);assertEquals(setOf(5),material.excluded)
+        assertEquals(5,material.lastPage)
+        val snapshot=material
+        material=insertClassroomPage(material,PageFile("6","6",remoteKey="6"),catalog+ClassroomPage("6","url"))
+        assertEquals(5,snapshot.pages.size);assertEquals(6,material.pages.size)
+        assertEquals(snapshot.pageNotes,material.pageNotes)
+    }
 }

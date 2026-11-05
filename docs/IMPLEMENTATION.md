@@ -73,7 +73,7 @@ SQLite 为应用私有目录 databases/keye-library.sqlite，原件与预览为 
 
 SchoolLoginScreen 保持学校原始 WebView 表单，仅设稳定资源 ID 与 IMPORTANT_FOR_AUTOFILL_YES，不读取密码、不注入表单脚本、不自行保存凭据，也不强制触发系统密码管理器。加载显示原生反馈，十二秒提示慢加载；主页面 HTTP／网络／SSL、脚本或样式资源失败与渲染进程退出分别处理。SSL 始终取消，非 HTTPS 跳转不绕过限制。完成与可见回调按当前文档 URL 过滤，错误仅处理当前 WebView 的主文档、忽略主动中止；系统错误文档和进度结束不覆盖已有失败；退出销毁 WebView，渲染器退出后可重新创建。重试不清 Cookie、不自动重交表单。只显示当前域名，不展示带鉴权参数的完整地址。
 
-Debug 的 UiGalleryActivity 提供 page=login-error 检查入口，默认使用本机失败地址，可通过 url 参数指定检查站点；关闭会话验证，不清 Cookie，不进入正式包。模拟器已用同一生产页面验证主文档连接失败、重复重试、HTTP 503、证书错误，以及 stop-login-renderer 后重新创建网页；网络重试上限与旧文档完成回调由 SchoolSessionTest 覆盖。此类检查不替代真实学校账号及不同手机密码管理器的实际验证。
+Debug 的 UiGalleryActivity 提供 page=login-error 检查入口，默认使用本机失败地址，可通过 url 参数指定检查站点；关闭会话验证，不清 Cookie，不进入正式包。模拟器已用同一生产页面验证主文档连接失败、重复重试、HTTP 503、证书错误，以及 stop-login-renderer 后重新创建网页；SchoolSessionTest 覆盖认证错误分类、已认证空课表与验证重试预算；网页回调和登录页关闭通过对应界面流程验证。此类检查不替代真实学校账号及不同手机密码管理器的实际验证。
 
 学校接口对无课日期实际返回 success=true、result.code=400、msg=“课表为空”，且省略 list；有课日返回 result.code=200 和 list。SchoolScheduleStatus 只将已确认的无课组合识别为 Empty，未知 400、失败的外层 success 与服务异常均不当作登录成功。登录验证确认响应状态后即可完成；课表扫描把合法无课返回转换为空集合，业务成功但缺少必要列表时仍报告数据问题。日期按学校时区计算，不与手机时区混用。已使用真实有效登录及实际无课日期核对：自动验证和点击“完成”均关闭登录页，批量获取查询该日正常显示无课次，且未退出或清除账号。
 

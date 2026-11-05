@@ -45,6 +45,25 @@ adb -s DEVICE_SERIAL shell am start -n io.github.goooseby.keye/.MainActivity
 
 在 Android Studio 的 **Tools → Device Manager** 创建手机虚拟设备，选择本机可用的系统镜像后启动，再从运行设备列表选择它。Windows 使用模拟器需要相应虚拟化支持；采用 ADB 真机开发时无需安装模拟器。
 
+## 自动检查的取舍与执行
+
+单元测试按稳定职责组织：阅读与队列、课堂跟看、课表规则、登录状态、应用更新。保留能保护实际业务决策、关键边界和真实缺陷的用例，例如避免误判退出登录、补页迁移批注、保留页导出、更新来源与签名校验。新增前先检查已有覆盖；删除功能时同步清理对应测试。避免只验证语言自带的复制／过滤行为、重复覆盖同一分支，或把所有可调整的等待常量锁死。
+
+检查范围随改动选择：
+
+- 修改某一领域的规则，优先运行该领域单测；改动涉及多个领域或公共数据行为时跑完整单测。
+- 普通颜色、间距和文案调整，做编译及对应页面观察，不逐控件新增单测。
+- 准备发布时保留完整单测、Release 静态检查与正式构建，由发布工作流执行。
+
+```powershell
+# 登录规则的定向检查
+.\gradlew.bat :app:testDebugUnitTest --tests "io.github.goooseby.keye.SchoolSessionTest"
+# 全部轻量单测
+.\gradlew.bat :app:testDebugUnitTest
+```
+
+单测执行时间记录在 app/build/test-results/testDebugUnitTest 的 XML 报告中。包含 Gradle 启动、编译和 Lint 的整条命令耗时，不等于测试本身的成本。完整单测保持轻量，按风险和可维护性判断是否新增，不设数量目标；不把通过数量当作功能验收结果。
+
 ## 功能与视觉检查
 
 优先使用自建图片与 PDF。学校功能由账号持有人使用有权访问的账号登录检查；真实账号、Cookie、课件和设备截图不作为代码样例提交。

@@ -23,18 +23,17 @@ class TimetablePolicyTest {
         assertFalse(scheduleIsFresh(0,90_000));assertFalse(scheduleIsFresh(100_000,99_999))
         assertTrue(scheduleIsFresh(100_000,189_999));assertFalse(scheduleIsFresh(100_000,190_001))
     }
-    @Test fun lessonsOnDifferentDaysDoNotShareOverlapColumns() {
+    @Test fun overlappingLessonsGroupTogetherWithoutMixingDaysOrAdjacentLessons() {
         val a=entry("a");val b=entry("b",start="10:00",end="12:00");val c=entry("c",day="2026-11-04")
-        val positions=placeLessons(listOf(c,b,a)).associateBy {it.entry.id}
-        assertEquals(2,positions.getValue("a").columns);assertEquals(2,positions.getValue("b").columns)
-        assertNotEquals(positions.getValue("a").column,positions.getValue("b").column)
-        assertEquals(1,positions.getValue("c").columns)
+        val groups=placeLessons(listOf(c,b,a)).groupBy {it.entry.day to it.group}
+        assertEquals(setOf(setOf("a","b"),setOf("c")),groups.values.map {group ->group.map {it.entry.id}.toSet()}.toSet())
         val adjacent=placeLessons(listOf(a,entry("after",start="11:00",end="12:00")))
-        assertTrue(adjacent.all {it.columns==1})
+        assertEquals(2,adjacent.groupBy {it.group}.size)
     }
-    @Test fun shortCardsStayTappableWithoutCoveringEachOther() {
+    @Test fun shortCardsShareASelectionGroupInsteadOfCoveringEachOther() {
         val placements=placeLessons(listOf(entry("short1",start="09:00",end="09:10"),entry("short2",start="09:20",end="09:30")))
-        assertTrue(placements.all {it.columns==2});assertEquals(2,placements.map {it.column}.distinct().size)
+        assertEquals(2,placements.size)
+        assertEquals(1,placements.map {it.group}.distinct().size)
         assertTrue(placeLessons(listOf(entry("bad",end="08:00"),entry("unknown").copy(startsAt=null))).isEmpty())
     }
     @Test fun publicationVisibilityUsesPlatformRulesAndAdminException() {
@@ -58,4 +57,16 @@ class TimetablePolicyTest {
         assertTrue(shouldRefreshScheduleWeek(current,saved,saved-1,today))
     }
 
+    @Test fun semesterBoundariesUseNearestMondayAcrossYears() {
+        assertEquals(LocalDate.of(2026,8,31),semesterStart(LocalDate.of(2026,11,3)))
+        assertEquals(LocalDate.of(2026,3,2),semesterStart(LocalDate.of(2026,3,2)))
+        assertEquals(LocalDate.of(2025,9,1),semesterStart(LocalDate.of(2026,1,15)))
+        assertEquals(LocalDate.of(2026,3,2),semesterStart(LocalDate.of(2026,8,30)))
+    }
+
+    @Test fun schoolTimestampsAcceptSecondsOrMillisecondsAndRejectMissingValues() {
+        assertEquals(1793580570000L,scheduleTimestamp("1793580570"))
+        assertEquals(1793580570000L,scheduleTimestamp("1793580570000"))
+        assertNull(scheduleTimestamp(""))
+    }
 }
