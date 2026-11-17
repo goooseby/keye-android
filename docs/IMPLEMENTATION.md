@@ -21,6 +21,8 @@ ReaderMedia 从原文件解码，PDF 原页在普通显示时按最长边 1800 �
 
 课件信息提供名称／备注编辑、归类、移入回收站。页面总览支持页面／书签／已移除筛选、长按多选、批量移除与恢复；更多菜单可以移除当前页。excluded 持久记录可恢复的移除状态，原件不删除，阅读与默认输出都跳过这些页。PageSelection 统一保留页索引、移除校验、邻页定位及跨课件导出范围映射，至少保留一页。
 
+课程详情更多菜单支持解散和整门删除，复用现有回收站。课程 lifecycle、移除时间与删除批次采用兼容 JSON 字段，批量变更以 SQLite 事务保存。解散清空归属并保留内容，整门恢复仅恢复本次随课程删除的成员；学校来源记录抑制自动重建，后续获取明确处理归属。规则和验收见 [课程管理](COURSE_MANAGEMENT.md)。
+
 ## 课表、缓存与状态
 
 TimetableScreen 使用真实周数据提供当日时间轴和七列总览；ScheduleEntry 兼容保存 startsAt／endsAt、status、statusLabel、teacher、room、reviewType。SchoolApi 解析学校状态和角色可见性；SchedulePolicy 统一 Asia/Shanghai 的日期与周界限、状态映射、同日重叠和刷新时效。AcquireScreen 的跟看入口也使用新鲜服务器状态，不再单凭上课时间判断直播。本学期快捷日期仍以最近已到来的学期边界附近周一计算，可手动调整，最大范围 220 天。

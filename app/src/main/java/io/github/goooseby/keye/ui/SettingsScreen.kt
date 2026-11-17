@@ -29,7 +29,7 @@ import io.github.goooseby.keye.ui.components.SheetHeading
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(state: UiState,model: KeyeViewModel,onLogin: () -> Unit,onTasks: () -> Unit={},onTrash: () -> Unit={},onUpdates: () -> Unit={},updateStatus: String?=null) {
+fun SettingsScreen(state: UiState,model: KeyeViewModel,onLogin: () -> Unit,onTasks: () -> Unit={},onTrash: () -> Unit={},onUpdates: () -> Unit={},updateStatus: String?=null,onAnnouncements: () -> Unit={},announcementUnread: Int=0) {
     val context=LocalContext.current
     val currentVersion=remember {context.packageManager.getPackageInfo(context.packageName,0).versionName.orEmpty()}
     var networkOpen by remember{mutableStateOf(false)}
@@ -73,6 +73,8 @@ fun SettingsScreen(state: UiState,model: KeyeViewModel,onLogin: () -> Unit,onTas
             Surface(shape=RoundedCornerShape(20.dp),color=MaterialTheme.colorScheme.surfaceContainer) {
                 Column {
                     PreferenceRow("refresh","应用更新",subtitle=updateStatus?:"当前版本 $currentVersion",compact=true,onClick=onUpdates)
+                    HorizontalDivider(Modifier.padding(start=62.dp),color=MaterialTheme.colorScheme.outlineVariant.copy(alpha=.5f))
+                    PreferenceRow("info","应用公告",subtitle=if(announcementUnread>0) "$announcementUnread 条未读" else "通知与使用说明",compact=true,onClick=onAnnouncements)
                     HorizontalDivider(Modifier.padding(start=62.dp),color=MaterialTheme.colorScheme.outlineVariant.copy(alpha=.5f))
                     PreferenceRow("code","GitHub · SCUT Slides","代码公开，欢迎探索和改进",compact=true,onClick={
                         runCatching {context.startActivity(Intent(Intent.ACTION_VIEW,Uri.parse("https://github.com/goooseby/keye-android")))}

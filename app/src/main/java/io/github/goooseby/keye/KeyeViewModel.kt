@@ -2,6 +2,10 @@ package io.github.goooseby.keye
 
 import io.github.goooseby.keye.data.CachedSchedule
 import io.github.goooseby.keye.domain.schoolToday
+import io.github.goooseby.keye.domain.removeCourse
+import io.github.goooseby.keye.domain.restoreCourse
+import io.github.goooseby.keye.domain.restoreCourseMaterial
+import io.github.goooseby.keye.domain.schoolCourseDestination
 import io.github.goooseby.keye.domain.schoolWeek
 import io.github.goooseby.keye.domain.scheduleIsFresh
 import android.app.Application
@@ -74,6 +78,8 @@ data class TimetableState(
     val loading: Boolean=false,val checkedAt: Long=0,val error: String?=null,val fromCache: Boolean=true
 )
 
+data class CourseAcquisitionRequest(val entries: List<ScheduleEntry>, val follow: Boolean, val retryTaskId: String? = null)
+
 data class UiState(
     val timetable: TimetableState = TimetableState(),
     val hasTimetableCache: Boolean = false,
@@ -82,6 +88,9 @@ data class UiState(
     val loading: Boolean = true,
     val loadError: String? = null,
     val courses: List<Course> = emptyList(),
+    val courseRecords: List<Course> = emptyList(),
+    val courseAcquisition: CourseAcquisitionRequest? = null,
+    val busyCourseIds: Set<String> = emptySet(),
     val materials: List<StudyMaterial> = emptyList(),
     val tasks: List<TaskRecord> = emptyList(),
     val schedule: List<ScheduleEntry> = emptyList(),
@@ -125,6 +134,8 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
     private val importSlots = Semaphore(1)
     private val queuedSources = ConcurrentHashMap.newKeySet<String>()
     private val materialMutex = Mutex()
+    private val courseGate = Any()
+    private val courseWork = mutableMapOf<String, Set<String>>()
     private val classroomRunLock=Mutex()
     private var classroomJob: Job?=null
     private val classroomGeneration=java.util.concurrent.atomic.AtomicLong()
@@ -150,7 +161,7 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
                 val cached=account?.let {store.scheduleWeek(it,week)}
                 if(cached!=null) weekMemory["$account:$week"]=cached
                 val hasCache=account?.let {store.hasScheduleWeeks(it)}==true
-                mutableState.update { it.copy(loading=false,courses=courses,materials=materials,tasks=interrupted,settings=settings,
+                mutableState.update { it.copy(loading=false,courses=courses.filter { c -> c.active },courseRecords=courses,materials=materials,tasks=interrupted,settings=settings,
                     hasTimetableCache=it.hasTimetableCache || (account==timetableAccount && hasCache),
                     timetable=if(it.timetable.checkedAt==0L && it.timetable.week==week && cached!=null && account==timetableAccount) TimetableState(week,cached.entries,it.timetable.loading,cached.checkedAt) else it.timetable) }
             } catch (error: CancellationException) {
@@ -163,7 +174,8 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
 
     private suspend fun refreshLibrary() = withContext(Dispatchers.IO) {
         mutableState.update {
-            it.copy(courses = store.courses(), materials = store.materials(), tasks = store.tasks())
+            val courses = store.courses()
+            it.copy(courses = courses.filter { c -> c.active }, courseRecords = courses, materials = store.materials(), tasks = store.tasks())
         }
     }
 
@@ -322,7 +334,7 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
         if(!schoolForeground) return
         val anchor="$account:$week:$direction"
         synchronized(weekRequestLock) {
-            if(prefetchAnchor==anchor) return
+            if(prefetchAnchor==anchor) { return }
             prefetchAnchor=anchor
             timetablePrefetch?.cancel()
             timetablePrefetch=viewModelScope.launch(Dispatchers.IO) {
@@ -425,10 +437,6 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
                 val entries = school.scan(credentials, start, end, state.value.settings.timeoutSeconds)
                 coroutineContext.ensureActive()
                 if (sequence != scanSequence.get() || auth != credentials) return@launch
-                val known = store.courses().map(Course::id).toSet()
-                entries.distinctBy(ScheduleEntry::groupId).filter { it.groupId !in known }
-                    .forEach { store.put(Course(id = it.groupId, title = it.title)) }
-                refreshLibrary()
                 mutableState.update { it.copy(schedule = entries, scheduleCheckedAt=System.currentTimeMillis(), schoolConnection=SchoolConnection.Connected, notice = "找到 ${entries.size} 节课") }
             } catch (error: CancellationException) {
                 throw error
@@ -465,7 +473,7 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
     }
     fun refreshClassroom() {if(state.value.classroom?.fetching!=true) classroomWake.trySend(Unit)}
     fun classroomInterval(seconds: Int) {
-        if(seconds !in setOf(3,5,10)) return
+        if(seconds !in setOf(3,5,10)) { return }
         getApplication<Application>().getSharedPreferences("classroom",0).edit().putInt("interval",seconds).apply()
         mutableState.update {it.copy(classroom=it.classroom?.copy(intervalSeconds=seconds))}
         classroomWake.trySend(Unit)
@@ -484,7 +492,8 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
             override fun image(page: ClassroomPage): ByteArray {checkAccount();return school.image(captured,page.url,if(live) state.value.settings.timeoutSeconds.coerceAtMost(12) else state.value.settings.timeoutSeconds)}
         }}
     }
-    fun startClassroom(entry: ScheduleEntry): Boolean {
+    fun startClassroom(entry: ScheduleEntry, allowUnfiled: Boolean = false): Boolean {
+        if (requestCourseAcquisition(listOf(entry), true, allowUnfiled)) return false
         val previous=state.value.classroom
         if(previous?.entry?.id==entry.id && classroomJob?.isActive==true) {resumeClassroom();return true}
         if(entry.id in queuedSources) {notice("此课次正在下载，请完成或取消下载后再跟看");return false}
@@ -492,9 +501,9 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
         val source=createPageSource(live=true)
         val generation=classroomGeneration.incrementAndGet()
         classroomJob?.cancel();classroomManuallyPaused=false
-        mutableState.update {it.copy(classroom=ClassroomSession(entry,previous?.takeIf {it.entry.id==entry.id}?.materialId ?: state.value.materials.firstOrNull {it.sourceKey==entry.id && !it.deleted}?.id,
+        synchronized(courseGate) { mutableState.update {it.copy(classroom=ClassroomSession(entry,previous?.takeIf {it.entry.id==entry.id}?.materialId ?: state.value.materials.firstOrNull {it.sourceKey==entry.id && !it.deleted}?.id,
             stage=if(source==null) ClassroomStage.NeedsLogin else ClassroomStage.Connecting,intervalSeconds=interval,
-            message=if(source==null) "请登录学校平台后继续，已有页面仍可阅读" else "正在连接课堂"))}
+            message=if(source==null) "请登录学校平台后继续，已有页面仍可阅读" else "正在连接课堂"))} }
         if(source==null) return true
         if(!source.owns(entry)) {
             mutableState.update {it.copy(classroom=it.classroom?.copy(stage=ClassroomStage.NeedsLogin,message="请使用查询此课次的学校账号登录"))};return false
@@ -513,9 +522,11 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
                         val existing=store.materialBySource(entry.id)
                         check(existing?.deleted!=true) {"该课件在回收站中，请先恢复后跟看"}
                         check(existing==null || existing.kind=="images") {"此课件类型不支持课堂跟看"}
-                        val material=(existing ?: StudyMaterial(sourceKey=entry.id,title=entry.title,day=entry.day,courseId=entry.groupId,kind="images",pages=emptyList())).copy(schoolEntry=entry)
-                        if(store.courses().none {it.id==entry.groupId}) store.put(Course(id=entry.groupId,title=entry.title))
-                        store.put(material);refreshLibrary();material
+                        val material=store.transaction {
+                            (existing ?: StudyMaterial(sourceKey=entry.id,title=entry.title,day=entry.day,courseId=resolveSchoolCourse(entry,allowUnfiled),kind="images",pages=emptyList()))
+                                .copy(schoolEntry=entry).also(store::put)
+                        }
+                        refreshLibrary();material
                     }
                     publish {it.copy(materialId=initial.id)}
                     // Old downloads have no remote keys. Match their original
@@ -606,6 +617,97 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
         }
     }
 
+    private fun requestCourseAcquisition(entries: List<ScheduleEntry>, follow: Boolean, allowUnfiled: Boolean, retryTaskId: String? = null): Boolean {
+        if (allowUnfiled) return false
+        val removed = state.value.courseRecords.filter { it.lifecycle == "trashed" }.map { it.id }.toSet()
+        if (entries.none { entry -> entry.groupId in removed && state.value.materials.none { it.sourceKey == entry.id && !it.deleted } }) return false
+        mutableState.update { it.copy(courseAcquisition = CourseAcquisitionRequest(entries, follow, retryTaskId)) }
+        return true
+    }
+
+    private fun publishCourseWork() {
+        mutableState.update { it.copy(busyCourseIds = courseWork.values.flatten().toSet()) }
+    }
+
+    private fun releaseCourseWork(id: String) = synchronized(courseGate) {
+        courseWork.remove(id)
+        publishCourseWork()
+    }
+
+    /** Returns a follow entry for the UI to open after the user's decision. */
+    suspend fun resolveCourseAcquisition(restore: Boolean): ScheduleEntry? = withContext(Dispatchers.IO) {
+        val request = state.value.courseAcquisition ?: return@withContext null
+        if (restore) materialMutex.withLock {
+            store.transaction {
+                val ids = request.entries.map { it.groupId }.toSet()
+                store.courses().filter { it.id in ids && it.lifecycle == "trashed" }.forEach { course ->
+                    store.putCourseChange(restoreCourse(course, store.materials()))
+                }
+            }
+            refreshLibrary()
+        }
+        mutableState.update { it.copy(courseAcquisition = null) }
+        if (request.follow) request.entries.single()
+        else {
+            if (request.retryTaskId != null) retryTask(request.retryTaskId, allowUnfiled = !restore)
+            else download(request.entries, allowUnfiled = !restore)
+            null
+        }
+    }
+
+    fun cancelCourseAcquisition() { mutableState.update { it.copy(courseAcquisition = null) } }
+
+    /** Called inside materialMutex and a database transaction. */
+    private fun resolveSchoolCourse(entry: ScheduleEntry, allowUnfiled: Boolean): String? {
+        val course = store.courses().firstOrNull { it.id == entry.groupId }
+        val destination = schoolCourseDestination(course, entry.groupId, allowUnfiled)
+        if (course == null) store.put(Course(id = entry.groupId, title = entry.title))
+        if (course?.lifecycle == "dissolved") notice("「${course.title}」已解散，新课件已保存到未归类")
+        return destination
+    }
+
+    fun courseActivity(courseId: String): String? = synchronized(courseGate) {
+        val current = state.value
+        val members = current.materials.filter { it.courseId == courseId }.map { it.id }.toSet()
+        val session = current.classroom
+        if (session != null && session.stage != ClassroomStage.Ended &&
+            (session.entry.groupId == courseId || session.materialId in members)) "该课程有尚未结束的课堂跟看，请结束跟看后重试"
+        else if (courseId in current.busyCourseIds || current.tasks.any { task ->
+            task.status in setOf("queued", "running") && (task.materialId in members || runCatching {
+                val payload = JSONObject(task.payload)
+                if (task.type == "download") payload.optString("groupId") == courseId
+                else task.type == "import" && payload.textOrNull("courseId") == courseId
+            }.getOrDefault(false))
+        }) "该课程还有进行中的任务，请完成或取消后重试"
+        else null
+    }
+
+    suspend fun removeManagedCourse(expected: Course, members: Map<String, Boolean>, dissolve: Boolean) = withContext(Dispatchers.IO) {
+        materialMutex.withLock {
+            synchronized(courseGate) {
+                courseActivity(expected.id)?.let { error(it) }
+                val course = store.courses().firstOrNull { it.id == expected.id } ?: error("课程不存在")
+                val materials = store.materials()
+                check(course == expected && materials.filter { it.courseId == course.id }.associate { it.id to it.deleted } == members) {
+                    "课程内容已变化，请核对最新数量后重试"
+                }
+                store.putCourseChange(removeCourse(course, materials, dissolve, newId(), System.currentTimeMillis()))
+            }
+            refreshLibrary()
+        }
+        val count = members.values.count { !it }
+        notice(if (count == 0) "空课程已删除" else if (dissolve) "课程已解散，$count 份课件已移到未归类" else "课程及 $count 份课件已移入回收站")
+    }
+
+    suspend fun restoreManagedCourse(id: String) = withContext(Dispatchers.IO) {
+        materialMutex.withLock {
+            val course = store.courses().firstOrNull { it.id == id } ?: error("课程不存在")
+            store.putCourseChange(restoreCourse(course, store.materials()))
+            refreshLibrary()
+        }
+        notice("课程及本次随课程移除的课件已恢复")
+    }
+
     fun createCourse(title: String, term: String = "") = action {
         require(title.isNotBlank()) { "请输入课程名称" }
         store.put(Course(title = title.trim().take(120), term = term.trim().take(80)))
@@ -614,9 +716,11 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
 
     fun renameCourse(courseId: String, title: String, term: String) = action {
         require(title.isNotBlank()) { "请输入课程名称" }
-        val course = store.courses().firstOrNull { it.id == courseId } ?: error("课程不存在")
-        store.put(course.copy(title = title.trim().take(120), term = term.trim().take(80)))
-        refreshLibrary()
+        materialMutex.withLock {
+            val course = store.courses().firstOrNull { it.id == courseId && it.active } ?: error("课程不存在")
+            store.put(course.copy(title = title.trim().take(120), term = term.trim().take(80)))
+            refreshLibrary()
+        }
     }
 
     fun updateMaterial(id: String, title: String? = null, note: String? = null, courseId: String? = null) = action {
@@ -631,18 +735,20 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
     }
 
     fun assignCourse(id: String, courseId: String?) = action {
-        if (courseId != null && store.courses().none { it.id == courseId }) error("课程不存在")
-        editMaterial(id) { it.copy(courseId = courseId, touched = System.currentTimeMillis()) }
+        editMaterial(id) {
+            if (courseId != null && store.courses().none { c -> c.id == courseId && c.active }) error("课程不存在")
+            it.copy(courseId = courseId, courseRemovalBatchId = null, touched = System.currentTimeMillis())
+        }
     }
 
     fun assignCourses(ids: List<String>, courseId: String?) = action {
-        if (courseId != null && store.courses().none { it.id == courseId }) error("课程不存在")
         materialMutex.lock()
         try {
+            if (courseId != null && store.courses().none { it.id == courseId && it.active }) error("课程不存在")
             ids.distinct().forEach { id ->
                 val current = store.material(id) ?: return@forEach
                 if (!current.deleted && current.courseId != courseId) {
-                    store.put(current.copy(courseId = courseId, touched = System.currentTimeMillis()))
+                    store.put(current.copy(courseId = courseId, courseRemovalBatchId = null, touched = System.currentTimeMillis()))
                 }
             }
             refreshLibrary()
@@ -657,7 +763,7 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
             ids.distinct().forEach { id ->
                 val current = store.material(id) ?: return@forEach
                 if (!current.deleted) {
-                    store.put(current.copy(deleted = true, touched = System.currentTimeMillis()))
+                    store.put(current.copy(deleted = true, courseRemovalBatchId = null, touched = System.currentTimeMillis()))
                 }
             }
             refreshLibrary()
@@ -667,7 +773,10 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
     }
 
     fun setDeleted(id: String, deleted: Boolean) = action {
-        editMaterial(id) { it.copy(deleted = deleted, touched = System.currentTimeMillis()) }
+        editMaterial(id) {
+            (if (deleted) it.copy(deleted = true, courseRemovalBatchId = null) else restoreCourseMaterial(it, store.courses()))
+                .copy(touched = System.currentTimeMillis())
+        }
     }
 
     fun toggleExcluded(id: String, page: Int) = action {
@@ -763,25 +872,34 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
         return true
     }
 
-    fun download(entries: List<ScheduleEntry>): Boolean {
+    fun download(entries: List<ScheduleEntry>, allowUnfiled: Boolean = false): Boolean {
+        if (requestCourseAcquisition(entries, false, allowUnfiled)) return true
         val source=createPageSource() ?: run {notice("请先登录学校平台");return false}
         val accepted=entries.distinctBy(ScheduleEntry::id).filter {entry ->
             if(!source.owns(entry)) {notice("请使用查询这些课次的学校账号登录");false}
             else releasePausedClassroom(entry) && queuedSources.add(entry.id)
         }
         if(accepted.isEmpty()) return false
+        val reservation = newId()
+        synchronized(courseGate) {
+            courseWork[reservation] = accepted.flatMap { entry -> listOfNotNull(entry.groupId,
+                state.value.materials.firstOrNull { it.sourceKey == entry.id }?.courseId) }.toSet()
+            publishCourseWork()
+        }
         viewModelScope.launch(Dispatchers.IO) {
             val batchTime=System.currentTimeMillis()
-            val tasks=accepted.mapIndexed {index,entry ->TaskRecord(type="download",title=entry.title+" · "+entry.day,payload=entry.json().toString(),createdAt=batchTime,batchOrder=index,message="等待下载")}
+            val tasks=accepted.mapIndexed {index,entry ->TaskRecord(type="download",title=entry.title+" · "+entry.day,payload=entry.json().put("allowUnfiled",allowUnfiled).toString(),createdAt=batchTime,batchOrder=index,message="等待下载")}
             try {
                 // Publish the complete batch before any worker can publish progress.
-                store.putTasks(tasks)
-                mutableState.update {it.copy(tasks=mergeTaskBatch(it.tasks,tasks))}
+                materialMutex.withLock {
+                    store.putTasks(tasks)
+                    mutableState.update {it.copy(tasks=mergeTaskBatch(it.tasks,tasks))}
+                }
                 val pending=tasks.zip(accepted).map {(task,entry) ->
                     val job=viewModelScope.launch(Dispatchers.IO,start=CoroutineStart.LAZY) {
                         try {
                             downloadSlots.withPermit {
-                                downloadTask(task,entry,source)
+                                downloadTask(task,entry,source,allowUnfiled)
                             }
                         } catch(_: CancellationException) {if(state.value.tasks.firstOrNull {it.id==task.id}?.status!="cancelled") putTask(task.copy(status="cancelled",message="已取消"))}
                         finally {queuedSources.remove(entry.id);jobs.remove(task.id)}
@@ -794,12 +912,12 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
                 accepted.forEach {queuedSources.remove(it.id)}
                 if(error is CancellationException) throw error
                 notice(error.message ?: "无法添加下载任务")
-            }
+            } finally { releaseCourseWork(reservation) }
         }
         return true
     }
 
-    private suspend fun downloadTask(task: TaskRecord, entry: ScheduleEntry, source: ClassroomPageSource) {
+    private suspend fun downloadTask(task: TaskRecord, entry: ScheduleEntry, source: ClassroomPageSource, allowUnfiled: Boolean = false) {
         var materialId:String?=null
         try {
             putTask(task.copy(status="running",message="正在检查可用页面"))
@@ -812,10 +930,11 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
                 val old=store.materialBySource(entry.id)
                 check(old?.deleted!=true) {"课件在回收站中，请先恢复"}
                 check(old==null || old.kind=="images") {"此课件类型不支持补全"}
-                val current=(old ?: StudyMaterial(id=task.id,sourceKey=entry.id,title=entry.title,day=entry.day,courseId=entry.groupId,kind="images",pages=emptyList()))
-                    .copy(schoolEntry=entry,remotePageCount=maxOf(old?.remotePageCount ?: 0,catalog.size))
-                if(store.courses().none {it.id==entry.groupId}) store.put(Course(id=entry.groupId,title=entry.title))
-                store.put(current);refreshLibrary();current
+                val current=store.transaction {
+                    (old ?: StudyMaterial(id=task.id,sourceKey=entry.id,title=entry.title,day=entry.day,courseId=resolveSchoolCourse(entry,allowUnfiled),kind="images",pages=emptyList()))
+                        .copy(schoolEntry=entry,remotePageCount=maxOf(old?.remotePageCount ?: 0,catalog.size)).also(store::put)
+                }
+                refreshLibrary();current
             }
             materialId=material.id
             val legacy=legacyHashes(material)
@@ -852,7 +971,7 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
         jobs[id]?.cancel()
     }
 
-    fun retryTask(id: String) {
+    fun retryTask(id: String, allowUnfiled: Boolean = false) {
         val task = state.value.tasks.firstOrNull { it.id == id } ?: return
         if (task.status !in setOf("failed", "cancelled")) return
         if (task.type == "import") {
@@ -871,18 +990,25 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
             notice("请使用获取这份课件时的学校账号登录")
             return
         }
+        // Re-run destination selection instead of silently reusing an obsolete target.
+        if (requestCourseAcquisition(listOf(entry), false, allowUnfiled, id)) return
         if(!releasePausedClassroom(entry) || !queuedSources.add(entry.id)) return
+        synchronized(courseGate) {
+            courseWork[id] = setOfNotNull(entry.groupId, state.value.materials.firstOrNull { it.sourceKey == entry.id }?.courseId)
+            publishCourseWork()
+        }
         val job = viewModelScope.launch(Dispatchers.IO, start = CoroutineStart.LAZY) {
             try {
                 putTask(task.copy(status = "queued", progress = 0, message = "等待下载"))
                 downloadSlots.withPermit {
-                        downloadTask(task, entry, source)
+                        downloadTask(task, entry, source, allowUnfiled)
                     }
             } catch (_: CancellationException) {
                 if(state.value.tasks.firstOrNull {it.id==task.id}?.status!="cancelled") putTask(task.copy(status = "cancelled", message = "已取消"))
             } finally {
                 queuedSources.remove(entry.id)
                 jobs.remove(id)
+                releaseCourseWork(id)
             }
         }
         jobs[id] = job
@@ -907,6 +1033,13 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
 
     private fun queueImport(record: TaskRecord, uris: List<Uri>, courseId: String?) {
         if (jobs.containsKey(record.id)) return
+        synchronized(courseGate) {
+            if (courseId != null && store.courses().none { it.id == courseId && it.active }) {
+                notice("原课程已移除，请重新选择导入课程或选择未归类"); return
+            }
+            courseWork[record.id] = setOfNotNull(courseId)
+            publishCourseWork()
+        }
         val payload = JSONObject().put("uris", org.json.JSONArray(uris.map(Uri::toString)))
             .put("courseId", courseId).toString()
         val task = record.copy(payload = payload, progress = 0)
@@ -930,8 +1063,11 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
                 imported = if (pdf) media.importPdf(uris.first(), courseId, progress)
                     else media.importImages(uris, courseId, progress)
                 coroutineContext.ensureActive()
-                store.put(imported)
-                committed = true
+                materialMutex.withLock {
+                    check(courseId == null || store.courses().any { it.id == courseId && it.active }) { "目标课程已移除，请重新选择课程" }
+                    store.put(imported)
+                    committed = true
+                }
                 putTask(task.copy(status = "done", progress = 100, message = "导入完成", materialId = imported.id))
                 refreshLibrary()
             } catch (error: CancellationException) {
@@ -946,6 +1082,7 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
             } finally {
                 if (acquired) importSlots.release()
                 jobs.remove(task.id)
+                releaseCourseWork(task.id)
             }
         }
         jobs[task.id] = job

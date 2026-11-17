@@ -6,3 +6,6 @@
 -keepclassmembers,allowoptimization,allowobfuscation class io.github.goooseby.keye.update.AppUpdateViewModel {
     public <init>(android.app.Application);
 }
+-keepclassmembers,allowoptimization,allowobfuscation class io.github.goooseby.keye.announcements.AnnouncementViewModel {
+    public <init>(android.app.Application);
+}

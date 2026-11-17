@@ -16,13 +16,19 @@ data class Course(
     val id: String = newId(),
     val title: String,
     val term: String = "",
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    val lifecycle: String = "active",
+    val removedAt: Long = 0,
+    val removalBatchId: String? = null
 ) {
+    val active get() = lifecycle == "active"
     fun json() = JSONObject().put("id", id).put("title", title).put("term", term).put("createdAt", createdAt)
+        .put("lifecycle", lifecycle).put("removedAt", removedAt).put("removalBatchId", removalBatchId)
     companion object {
         fun from(value: JSONObject) = Course(
             value.getString("id"), value.optString("title"), value.optString("term"),
-            value.optLong("createdAt")
+            value.optLong("createdAt"), value.optString("lifecycle", "active"),
+            value.optLong("removedAt"), value.textOrNull("removalBatchId")
         )
     }
 }
@@ -65,7 +71,8 @@ data class StudyMaterial(
     val schoolEntry: ScheduleEntry? = null,
     val pageNotes: Map<Int,String> = emptyMap(),
     val touched: Long = System.currentTimeMillis(),
-    val remotePageCount: Int? = null
+    val remotePageCount: Int? = null,
+    val courseRemovalBatchId: String? = null
 ) {
     val keptCount get() = pages.size - excluded.size
     val reviewed get() = reviewRevision == revision
@@ -80,6 +87,7 @@ data class StudyMaterial(
         .put("lastPage", lastPage).put("readAt", readAt).put("readOffset", readOffset).put("readFraction", readFraction.toDouble())
         .put("bookmarks", JSONArray(bookmarks.sorted())).put("deleted", deleted).put("touched", touched)
         .put("schoolEntry",schoolEntry?.json()).put("remotePageCount",remotePageCount)
+        .put("courseRemovalBatchId",courseRemovalBatchId)
         .put("pageNotes",JSONObject().also {obj ->pageNotes.forEach {(page,text) ->obj.put(page.toString(),text)}})
 
     companion object {
@@ -109,7 +117,8 @@ data class StudyMaterial(
                 schoolEntry=value.optJSONObject("schoolEntry")?.let {ScheduleEntry.from(it)},
                 pageNotes=value.optJSONObject("pageNotes")?.let {obj ->obj.keys().asSequence().mapNotNull {key ->key.toIntOrNull()?.takeIf {it>0}?.let {it to obj.optString(key).take(2000)}}.toMap()} ?: emptyMap(),
                 remotePageCount=if(value.isNull("remotePageCount")) null else value.optInt("remotePageCount").coerceAtLeast(0),
-                touched = value.optLong("touched")
+                touched = value.optLong("touched"),
+                courseRemovalBatchId = value.textOrNull("courseRemovalBatchId")
             )
         }
     }

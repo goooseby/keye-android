@@ -38,6 +38,8 @@ import io.github.goooseby.keye.export.ExportSheet
 import io.github.goooseby.keye.network.SchoolApi
 import io.github.goooseby.keye.ui.AcquireScreen
 import io.github.goooseby.keye.ui.CourseScreen
+import io.github.goooseby.keye.ui.CourseTrashScreen
+import io.github.goooseby.keye.ui.CourseAcquisitionDialog
 import io.github.goooseby.keye.ui.LibraryScreen
 import io.github.goooseby.keye.ui.SchoolLoginScreen
 import io.github.goooseby.keye.ui.SettingsScreen
@@ -57,7 +59,8 @@ import io.github.goooseby.keye.ui.components.PreferenceRow
 import io.github.goooseby.keye.ui.components.SheetHeading
 import io.github.goooseby.keye.ui.reader.ClassroomScreen
 import io.github.goooseby.keye.ui.reader.ReaderScreen
-import io.github.goooseby.keye.update.AppUpdateHost
+import io.github.goooseby.keye.announcements.AppMessagesHost
+import io.github.goooseby.keye.announcements.AnnouncementViewModel
 import io.github.goooseby.keye.update.AppUpdateViewModel
 import io.github.goooseby.keye.update.UPDATE_ACTION
 import io.github.goooseby.keye.update.UpdateDownloadStage
@@ -93,6 +96,8 @@ private data class AppPage(val kind: PageKind,val id: String?=null)
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun KeyeApp(model: KeyeViewModel,mediaPath: (String) -> File,updates: AppUpdateViewModel) {
+    val announcements: AnnouncementViewModel = viewModel()
+    val announcementState by announcements.state.collectAsState()
     val state by model.state.collectAsState()
     val updateState by updates.state.collectAsState()
     val context=LocalContext.current
@@ -144,6 +149,14 @@ private fun KeyeApp(model: KeyeViewModel,mediaPath: (String) -> File,updates: Ap
         } else {pendingLesson=entry.json().toString();pendingStarted=false;pendingError=null}
     }
     fun goBack() {if(materialId!=null) materialId=null else if(courseId!=null) courseId=null else section=if(section==Section.Tasks) tasksOrigin else if(section==Section.Acquire) acquireOrigin else if(section==Section.Trash) Section.Settings else Section.Timetable}
+    LaunchedEffect(courseId,state.courses,state.loading) {
+        if(!state.loading && !courseId.isNullOrEmpty() && state.courses.none {it.id==courseId}) {
+            courseId=null;section=Section.Library
+        }
+    }
+    if(state.courseAcquisition!=null) CourseAcquisitionDialog(state,model,
+        onCancel={model.cancelCourseAcquisition();pendingLesson=null;pendingStarted=false},
+        onFollow={entry,allowUnfiled ->if(model.startClassroom(entry,allowUnfiled)) classroomOpen=true})
     val lifecycleOwner=LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer=LifecycleEventObserver {_,event ->
@@ -186,7 +199,7 @@ private fun KeyeApp(model: KeyeViewModel,mediaPath: (String) -> File,updates: Ap
     val prepared=state.materials.firstOrNull {it.sourceKey==requestedLesson?.id && !it.deleted && it.pages.isNotEmpty()}
     LaunchedEffect(prepared?.id) {if(prepared!=null && requestedLesson!=null) {materialId=prepared.id;pendingLesson=null;pendingStarted=false}}
     LaunchedEffect(state.notice) {state.notice?.let{snackbar.showSnackbar(it);if(model.state.value.notice==it) model.notice(null)}}
-    AppUpdateHost(updates,canPrompt=pendingLesson==null && !classroomOpen && materialId==null && !loginOpen && exportIds.isEmpty() && !state.loading)
+    AppMessagesHost(updates,announcements,canPrompt=section in setOf(Section.Timetable,Section.Library) && state.courseAcquisition==null && courseId==null && pendingLesson==null && pendingClassroom==null && !chooseImportCourse && !classroomOpen && materialId==null && !loginOpen && exportIds.isEmpty() && !state.loading)
     if(exportIds.isNotEmpty()) {
         val materials=exportIds.mapNotNull { id ->state.materials.firstOrNull { it.id==id } }
         if(materials.isNotEmpty()) ExportSheet(materials,shareOnly,onDismiss={exportIds=emptyList()},onSubmit={model.export(it.copy(origin=materialId?:section.name));exportIds=emptyList()})
@@ -255,14 +268,18 @@ private fun KeyeApp(model: KeyeViewModel,mediaPath: (String) -> File,updates: Ap
                                         }
                                     }
                                     when {
-                                        route.course!=null -> CourseScreen(course,state.courses,courseMaterials,
+                                        route.course!=null && (route.course.isEmpty() || course!=null) -> CourseScreen(course,state.courses,courseMaterials,
                                             onOpen={materialId=it},onImport={requestImport(route.course.takeIf(String::isNotEmpty))},
-                                            onExport={id,name ->requestExport(listOf(id),name)},onBatchExport={ids,name ->requestExport(ids,name)},mediaPath=mediaPath,model=model)
+                                            onExport={id,name ->requestExport(listOf(id),name)},onBatchExport={ids,name ->requestExport(ids,name)},mediaPath=mediaPath,model=model,
+                                            onRemoved={courseId=null;section=Section.Library},onTasks={courseId=null;tasksOrigin=Section.Library;section=Section.Tasks})
+                                        route.course!=null -> Unit
                                         route.section==Section.Timetable -> TimetableScreen(state,model,{requestLogin()},{openLesson(it)},{openClassroom(it)})
                                         route.section==Section.Library -> LibraryScreen(state,{courseId=it?:""},{materialId=it},{chooseImportCourse=true},
                                             {id,name ->requestExport(listOf(id),name)},{ids,name ->requestExport(ids,name)},mediaPath,model,onFollow={openClassroom(it)},onTimetable={section=Section.Timetable})
-                                        route.section==Section.Trash -> LibraryScreen(state,{},{},{},
-                                            {id,name ->requestExport(listOf(id),name)},{_,_ ->},mediaPath,model,initialTab=2,trashMode=true)
+                                        route.section==Section.Trash -> CourseTrashScreen(state,model) {onRemovedCourse ->
+                                            LibraryScreen(state,{},{},{},
+                                                {id,name ->requestExport(listOf(id),name)},{_,_ ->},mediaPath,model,initialTab=2,trashMode=true,onRemovedCourse=onRemovedCourse)
+                                        }
                                         route.section==Section.Acquire -> AcquireScreen(state,model,{requestLogin()},{model.download(it);tasksOrigin=Section.Acquire;section=Section.Tasks},onOpen={materialId=it},onFollow={openClassroom(it)},onResumeFollow={model.resumeClassroom();classroomOpen=true})
                                         route.section==Section.Tasks -> TasksScreen(state.tasks,model,onOpen={id ->
                                                 if(state.materials.any{it.id==id&&!it.deleted}) materialId=id else model.notice("课件已在回收站")
@@ -271,7 +288,7 @@ private fun KeyeApp(model: KeyeViewModel,mediaPath: (String) -> File,updates: Ap
                                                 UpdateDownloadStage.Downloading ->updateState.download.message
                                                 UpdateDownloadStage.Ready ->"${updateState.release?.version} 已下载，点击安装"
                                                 else ->updateState.release?.let {"发现新版本 ${it.version}"}
-                                        })
+                                        },onAnnouncements=announcements::showBoard,announcementUnread=announcementState.unreadCount)
                                     }
                                 }
                             }

@@ -46,7 +46,8 @@
 - **两种阅读方式**：默认竖屏连续滚动，也可切换逐页；支持双击和双指缩放。主动进入全屏时自动横屏。
 - **课堂页面自动保留**：跟看时新增页保存到对应课程，中途退出后可检查并补全缺页，已有书签和批注保留。
 - **页面整理**：单页或批量移除、撤销及恢复；原件保留，阅读与默认导出跳过已移除页。
-- **课程管理**：课程归类、名称与备注、课件搜索、下载参数、保存目录及回收站。
+- **课程管理**：课程归类与编辑、解散并保留课件、整门移入回收站及恢复；支持课件搜索与备注。
+- **应用公告**：在应用中查看通知与使用说明。
 - **应用内更新**：检查 GitHub Releases，通过系统下载并安装更新；支持忽略某个版本和关闭自动提醒。
 
 Android 10 起，PDF 默认导出到“下载 / Keye”，单页图片默认保存到“图片 / Keye”；也可在支持的入口选择其他目录。Android 8–9 首次导出需选择保存位置。同名文件自动编号。
@@ -66,14 +67,14 @@ Android 10 起，PDF 默认导出到“下载 / Keye”，单页图片默认保�
 
 [产品与交互设计](docs/PRODUCT_DESIGN.md) · [课表与直接阅读](docs/TIMETABLE.md) · [课堂跟看](docs/CLASSROOM.md) · [界面规范](docs/UI.md)
 
-[实现与能力边界](docs/IMPLEMENTATION.md) · [开发环境与调试](docs/ENVIRONMENT.md) · [更新与发布](docs/UPDATES.md)
+[实现与能力边界](docs/IMPLEMENTATION.md) · [开发环境与调试](docs/ENVIRONMENT.md) · [更新与发布](docs/UPDATES.md) · [应用公告](docs/ANNOUNCEMENTS.md)
 
 ---
 
 <details>
 <summary><strong>🛠️ 开发与构建</strong></summary>
 
-原生 Android 应用，使用 Kotlin 与 Jetpack Compose。当前项目版本为 **0.3.1**。
+原生 Android 应用，使用 Kotlin 与 Jetpack Compose。当前项目版本为 **0.3.4**。
 
 | 项目 | 配置 |
 | --- | --- |

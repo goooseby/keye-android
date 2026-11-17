@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title id="title">KOVRA geometric mark</title>
+  <rect width="64" height="64" rx="16" fill="#f4f1ea"/>
+  <g transform="translate(12 16) scale(.46) skewX(-12)">
+    <path d="M0 0h25v70H0z" fill="#171716"/>
+    <path d="M35 0h40L50 30H35z" fill="#3158ff"/>
+    <path d="M35 40h15L90 0h15L55 70H35z" fill="#171716"/>
+  </g>
+</svg>

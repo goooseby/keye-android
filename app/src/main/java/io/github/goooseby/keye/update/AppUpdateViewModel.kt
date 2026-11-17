@@ -16,7 +16,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 internal data class AppUpdateState(
-    val version: String="",val automatic: Boolean=true,val checking: Boolean=false,
+    val version: String="",val automatic: Boolean=true,val checking: Boolean=false,val initializing: Boolean=true,
     val release: AppRelease?=null,val download: UpdateDownload=UpdateDownload(),
     val panelOpen: Boolean=false,val prompt: Boolean=false,val message: String?=null,
     val preparingInstall: Boolean=false,val autoInstallPending: Boolean=false,val installer: Intent?=null
@@ -39,6 +39,7 @@ internal class AppUpdateViewModel(application: Application): AndroidViewModel(ap
             } catch(error: CancellationException) {throw error}
             catch(_: Exception) { /* Recovery is retried from the update page. */ }
             check(manual=false)
+            mutable.update {it.copy(initializing=false)}
         }
     }
     fun markPromptShown() {manager.prefs.edit().putString("last_prompt_day",LocalDate.now().toString()).apply()}

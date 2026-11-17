@@ -199,7 +199,11 @@ fun SchoolLoginScreen(model: KeyeViewModel,onClose: ()->Unit,initialPage: String
                                 override fun onReceivedHttpError(view: WebView?,request: WebResourceRequest?,response: WebResourceResponse?) {
                                     if(browser===view && request?.isForMainFrame==true) {
                                         val code=response?.statusCode
-                                        fail(if(code==429) "学校平台访问较频繁，请稍后重试" else "学校页面暂时不可用（HTTP $code），请稍后重试或重新进入")
+                                        fail(when(code) {
+                                            403 ->"学校拒绝访问（HTTP 403），可能存在网络访问限制"
+                                            429 ->"学校平台访问较频繁，请稍后重试"
+                                            else ->"学校页面暂时不可用（HTTP $code），请稍后重试或重新进入"
+                                        })
                                     }
                                 }
                                 override fun onReceivedSslError(view: WebView?,handler: SslErrorHandler?,error: SslError?) {
@@ -234,7 +238,15 @@ fun SchoolLoginScreen(model: KeyeViewModel,onClose: ()->Unit,initialPage: String
             }
             if(failure!=null) Surface(Modifier.fillMaxSize()) {
                 Column(Modifier.padding(24.dp),horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.Center) {
-                    EmptyState("error","学校页面暂时无法打开",detail=failure,action="重新加载",onAction={retry()})
+                    EmptyState("error","学校页面暂时无法打开",detail=failure)
+                    Text(
+                        "请检查：\n1. 尝试连接校园网或学校 SSLVPN\n2. 检查代理设置是否影响访问\n3. 同一网络下，浏览器能否打开",
+                        Modifier.padding(horizontal=24.dp),
+                        style=MaterialTheme.typography.bodySmall,
+                        color=MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(Modifier.height(24.dp))
+                    Button(onClick={retry()},contentPadding=PaddingValues(horizontal=28.dp,vertical=14.dp)) {Text("重新加载")}
                     TextButton(onClick={retry(home=true)}) {Text("重新进入学校平台")}
                 }
             } else if(!visible) Surface(Modifier.fillMaxSize()) {

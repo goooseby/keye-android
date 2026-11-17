@@ -73,7 +73,7 @@ Android 8 起通过系统“允许此来源安装应用”授权，应用只在�
 
 app/build.gradle.kts 的 release 构建启用 isMinifyEnabled 与 isShrinkResources，采用 proguard-android-optimize.txt 和 app/proguard-rules.pro。本机和 Actions 的 assembleRelease 都自动执行 R8，无需在工作流另写混淆命令。Debug 不压缩，便于日常调试。
 
-自定义保留规则仅针对 AndroidViewModelFactory 反射创建的两个 Application 构造函数，不整包保留类；页面数据使用显式 JSON 字段，不依赖反射序列化。Manifest 组件、Compose 和 AndroidX 的规则由 Android 构建工具及依赖提供。新增反射、JNI 或反射式序列化时，需同步检查精确的保留规则并验证优化后的包。
+自定义保留规则仅针对 AndroidViewModelFactory 反射创建的 KeyeViewModel、AppUpdateViewModel 和 AnnouncementViewModel 的 Application 构造函数，不整包保留类；页面数据使用显式 JSON 字段，不依赖反射序列化。Manifest 组件、Compose 和 AndroidX 的规则由 Android 构建工具及依赖提供。新增反射、JNI 或反射式序列化时，需同步检查精确的保留规则并验证优化后的包。
 
 Actions 归档 app/build/outputs/mapping/release，文件名包含构建提交 SHA，保存 90 天，缺少产物时构建失败；发布前也要求 mapping.txt 非空。每次正式发布后下载并长期保存对应映射，GitHub 构建附件到期后不再可取。排查混淆栈时用同一 APK 对应的 mapping.txt 配合 Android SDK Retrace，不能拿另一次构建的映射替代。映射不包含签名私钥，也不作为客户端更新附件。
 

@@ -67,13 +67,15 @@ internal fun courseTone(key: String): Pair<Color, Color> {
 @Composable
 fun LibraryScreen(state: UiState, onCourse: (String?) -> Unit, onMaterial: (String) -> Unit,
     onImport: () -> Unit, onExport: (String, String) -> Unit, onBatchExport: (List<String>, String) -> Unit,
-    mediaPath: (String) -> File, model: KeyeViewModel, initialTab: Int=1,onFollow: (ScheduleEntry)->Unit={},onTimetable: ()->Unit={},trashMode: Boolean=false) {
+    mediaPath: (String) -> File, model: KeyeViewModel, initialTab: Int=1,onFollow: (ScheduleEntry)->Unit={},onTimetable: ()->Unit={},trashMode: Boolean=false,
+    onRemovedCourse: (String) -> Unit = {}) {
     var liveNow by remember {mutableLongStateOf(System.currentTimeMillis())}
     LaunchedEffect(Unit) {while(true) {liveNow=System.currentTimeMillis();delay(15_000)}}
     val hasLive=state.loggedIn && !state.timetable.fromCache && state.timetable.error==null && scheduleIsFresh(state.timetable.checkedAt,liveNow) && state.timetable.entries.any {it.status==1 && it.day==schoolToday().toString()}
     var search by rememberSaveable { mutableStateOf("") }
     var tab by rememberSaveable(initialTab) { mutableIntStateOf(initialTab) }
     var newCourse by remember { mutableStateOf(false) }
+    var addMenu by remember { mutableStateOf(false) }
     var restore by remember {mutableStateOf<StudyMaterial?>(null)}
     var selected by remember { mutableStateOf(emptySet<String>()) }
     BackHandler(selected.isNotEmpty()) { selected=emptySet() }
@@ -108,8 +110,13 @@ fun LibraryScreen(state: UiState, onCourse: (String?) -> Unit, onMaterial: (Stri
                         item(span={GridItemSpan(maxLineSpan)}, key="courses heading") {
                             Row(Modifier.fillMaxWidth(), verticalAlignment=Alignment.CenterVertically) {
                                 Text("课程 · ${state.courses.size}",Modifier.weight(1f),style=MaterialTheme.typography.labelLarge,color=MaterialTheme.colorScheme.onSurfaceVariant)
-                                TextButton(onClick=onImport) {Text("导入")}
-                                TextButton(onClick={newCourse=true}) {AppIcon("add",modifier=Modifier.size(18.dp)); Spacer(Modifier.width(4.dp)); Text("新建")}
+                                Box {
+                                    IconButton(onClick={addMenu=true}) {AppIcon("add","添加课程或课件")}
+                                    DropdownMenu(addMenu,{addMenu=false}) {
+                                        DropdownMenuItem(text={Text("新建课程")},onClick={addMenu=false;newCourse=true})
+                                        DropdownMenuItem(text={Text("导入课件")},onClick={addMenu=false;onImport()})
+                                    }
+                                }
                             }
                         }
                         items(matchedCourses,key=Course::id,span={GridItemSpan(if(matchedCourses.size==1) maxLineSpan else 1)}) { course ->
@@ -135,7 +142,9 @@ fun LibraryScreen(state: UiState, onCourse: (String?) -> Unit, onMaterial: (Stri
                             MaterialCard(m,{if(m.deleted) restore=m else onMaterial(m.id)},{onExport(m.id,m.title)},{model.setDeleted(m.id,!m.deleted)},mediaPath,
                                 selected=if(selected.isNotEmpty()) m.id in selected else null,
                                 onSelect={selected=if(m.id in selected) selected-m.id else selected+m.id},
-                                onLongPress=if(!m.deleted) ({selected=selected+m.id}) else null,modifier=Modifier.animateItem())
+                                onLongPress=if(!m.deleted) ({selected=selected+m.id}) else null,modifier=Modifier.animateItem(),
+                                removedCourse=state.courseRecords.firstOrNull {it.id==m.courseId && it.lifecycle=="trashed" && it.removalBatchId!=null && it.removalBatchId==m.courseRemovalBatchId}?.title,
+                                onRemovedCourse={m.courseId?.let(onRemovedCourse)})
                         }
                     }
                 }
@@ -209,11 +218,12 @@ private fun BatchActions(materials: List<StudyMaterial>,courses: List<Course>,on
 @Composable
 fun CourseScreen(course: Course?,courses: List<Course>,materials: List<StudyMaterial>,onOpen: (String) -> Unit,
     onImport: () -> Unit,onExport: (String,String) -> Unit,onBatchExport: (List<String>,String) -> Unit,
-    mediaPath: (String) -> File,model: KeyeViewModel) {
+    mediaPath: (String) -> File,model: KeyeViewModel,onRemoved: () -> Unit = {},onTasks: () -> Unit = {}) {
     var editing by remember(course?.id){mutableStateOf(false)}
     var selecting by remember {mutableStateOf(false)}
     var selected by remember {mutableStateOf(emptySet<String>())}
     var menu by remember {mutableStateOf(false)}
+    var removal by remember(course?.id) {mutableStateOf<Boolean?>(null)}
     BackHandler(selecting){selecting=false;selected=emptySet()}
     var ascending by rememberSaveable {mutableStateOf(false)}
     val chosen=remember(materials,selected) {materials.filter {it.id in selected}}
@@ -244,6 +254,11 @@ fun CourseScreen(course: Course?,courses: List<Course>,materials: List<StudyMate
                             DropdownMenuItem(text={Text(if(selecting) "结束选择" else "选择课件")},leadingIcon={AppIcon("select")},onClick={selecting=!selecting;selected=emptySet();menu=false})
                             if(course!=null) DropdownMenuItem(text={Text("编辑课程")},leadingIcon={AppIcon("edit")},onClick={editing=true;menu=false})
                             DropdownMenuItem(text={Text("合并导出")},leadingIcon={AppIcon("export")},enabled=materials.isNotEmpty()&&materials.all{it.pages.isNotEmpty()},onClick={onBatchExport(materials.sortedWith(compareBy(StudyMaterial::day,StudyMaterial::title)).map(StudyMaterial::id),course?.title?:"未归类");menu=false})
+                            if(course!=null) {
+                                HorizontalDivider()
+                                if(materials.isNotEmpty()) DropdownMenuItem(text={Text("解散课程，保留课件")},leadingIcon={AppIcon("folder")},onClick={menu=false;removal=true})
+                                DropdownMenuItem(text={Text(if(materials.isEmpty()) "删除空课程" else "删除课程及课件")},leadingIcon={AppIcon("trash")},onClick={menu=false;removal=false})
+                            }
                         }
                     }
                 }
@@ -265,13 +280,17 @@ fun CourseScreen(course: Course?,courses: List<Course>,materials: List<StudyMate
         }
     }
     if(editing&&course!=null) CourseDialog(course,{editing=false}){title,term ->model.renameCourse(course.id,title,term);editing=false}
+    if(removal!=null && course!=null) {
+        val state by model.state.collectAsState()
+        CourseRemovalDialog(course,removal==true,state,model,{removal=null},onTasks,onRemoved)
+    }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun MaterialCard(material: StudyMaterial,onOpen: () -> Unit,onExport: () -> Unit,onTrash: () -> Unit,
     mediaPath: (String) -> File,selected: Boolean?=null,onSelect: (() -> Unit)?=null,onLongPress: (() -> Unit)?=null,
-    modifier: Modifier=Modifier) {
+    modifier: Modifier=Modifier,removedCourse: String?=null,onRemovedCourse: () -> Unit = {}) {
     var menu by remember {mutableStateOf(false)}
     val haptic=LocalHapticFeedback.current
     val background by animateColorAsState(if(selected==true) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,label="material selection")
@@ -290,6 +309,9 @@ fun MaterialCard(material: StudyMaterial,onOpen: () -> Unit,onExport: () -> Unit
                 Text(material.title,style=MaterialTheme.typography.titleMedium,maxLines=2,overflow=TextOverflow.Ellipsis)
                 Text("${if(material.kind=="pdf") "PDF" else "图片"}  ·  ${material.day}",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                 if(material.readAt>0 && !material.deleted) Text("读到 ${material.lastPage} / ${material.pages.size} 页",style=MaterialTheme.typography.labelSmall,color=MaterialTheme.colorScheme.primary)
+                if(removedCourse!=null) TextButton(onClick=onRemovedCourse,contentPadding=PaddingValues(0.dp)) {
+                    Text("随「$removedCourse」移除 · 查看课程",style=MaterialTheme.typography.labelSmall,maxLines=2,overflow=TextOverflow.Ellipsis)
+                }
             }
             if(selected==null) Box {
                 IconButton(onClick={menu=true}){AppIcon("more","课件操作",Modifier.size(20.dp))}

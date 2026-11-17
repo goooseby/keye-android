@@ -73,6 +73,23 @@ class LibraryStore private constructor(context: Context) : SQLiteOpenHelper(cont
         try {tasks.forEach(::put);db.setTransactionSuccessful()} finally {db.endTransaction()}
     }
 
+    fun putCourseChange(change: io.github.goooseby.keye.domain.CourseChange) {
+        transaction {
+            put(change.course)
+            change.materials.forEach(::put)
+        }
+    }
+
+    fun <T> transaction(block: () -> T): T {
+        val db = writableDatabase
+        db.beginTransaction()
+        try {
+            val result = block()
+            db.setTransactionSuccessful()
+            return result
+        } finally { db.endTransaction() }
+    }
+
     fun settings(): AppSettings =
         readableDatabase.rawQuery("SELECT value FROM settings WHERE key='app'", null).use { cursor ->
             if (cursor.moveToFirst()) AppSettings.from(JSONObject(cursor.getString(0))) else AppSettings()

@@ -1,0 +1,12 @@
+/* One slim navigation surface, continuously shaped by scroll position. */
+.header{--nav-progress:0;--nav-wide:min(1120px,calc(100vw - 64px));--nav-compact:min(920px,calc(100vw - 88px));position:sticky;top:0;height:64px;z-index:10;background:none;backdrop-filter:none;pointer-events:none}
+.header .nav{position:relative;top:calc(8px * var(--nav-progress));width:calc(var(--nav-wide) - (var(--nav-wide) - var(--nav-compact)) * var(--nav-progress));height:calc(62px - 10px * var(--nav-progress));padding-inline:calc(18px * var(--nav-progress));gap:24px;pointer-events:auto;border:1px solid transparent;border-bottom-color:var(--line-soft);border-radius:calc(40px * var(--nav-progress));background:color-mix(in srgb,var(--surface) calc(74% * var(--nav-progress)),transparent);backdrop-filter:blur(calc(20px * var(--nav-progress))) saturate(160%);-webkit-backdrop-filter:blur(calc(20px * var(--nav-progress))) saturate(160%);box-shadow:0 10px 32px rgb(0 0 0 / calc(.12 * var(--nav-progress))),inset 0 1px 0 rgb(255 255 255 / calc(.16 * var(--nav-progress)))}
+.header .nav::before{content:"";position:absolute;inset:-1px;border-radius:inherit;border:1px solid var(--line);opacity:var(--nav-progress);pointer-events:none;background:linear-gradient(120deg,rgb(255 255 255 / .055),transparent 42%,rgb(255 255 255 / .025));z-index:-1}
+.header .theme-toggle{width:32px;height:32px;flex-shrink:0}
+.header .brand{white-space:nowrap}
+html{scroll-padding-top:82px}
+@media(min-width:1600px){.header{--nav-wide:min(1180px,calc(100vw - 80px));--nav-compact:min(960px,calc(100vw - 88px))}}
+@media(max-width:850px){.header{--nav-wide:calc(100vw - 48px);--nav-compact:min(680px,calc(100vw - 64px))}.header .nav{gap:20px}}
+@media(max-width:650px){.header{--nav-wide:calc(100vw - 40px);--nav-compact:calc(100vw - 56px);height:58px}.header .nav{height:calc(56px - 8px * var(--nav-progress));top:calc(6px * var(--nav-progress));padding-inline:calc(10px * var(--nav-progress));gap:12px}.header .nav nav{gap:15px}.header .brand{font-size:14px;gap:7px}.header .brand-en{display:none}.header .brand-symbol{width:24px;height:24px}.header .theme-toggle{width:29px;height:29px}.header .nav nav{font-size:11px}html{scroll-padding-top:74px}}
+@supports not (backdrop-filter:blur(1px)){.header .nav{background:var(--header)}}
+.header .nav nav{color:var(--text)}

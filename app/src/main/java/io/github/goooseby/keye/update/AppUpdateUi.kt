@@ -31,7 +31,7 @@ import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun AppUpdateHost(model: AppUpdateViewModel,canPrompt: Boolean) {
+internal fun AppUpdateHost(model: AppUpdateViewModel,canPrompt: Boolean,automaticPromptAllowed: Boolean=true) {
     val state by model.state.collectAsState()
     val context=LocalContext.current
     val owner=LocalLifecycleOwner.current
@@ -72,7 +72,7 @@ internal fun AppUpdateHost(model: AppUpdateViewModel,canPrompt: Boolean) {
             else runCatching {context.startActivity(intent)}.onFailure {model.installError("系统无法打开安装程序；安装包已保留，请稍后重试")}
         }
     }
-    if(canPrompt && resumed && state.prompt && !state.panelOpen) {
+    if(canPrompt && automaticPromptAllowed && resumed && state.prompt && !state.panelOpen) {
         LaunchedEffect(state.release?.version) {model.markPromptShown()}
         AlertDialog(onDismissRequest=model::dismiss,icon={AppIcon("download")},title={Text("发现华工课栈 ${state.release?.version}")},text={
             Column(Modifier.heightIn(max=280.dp).verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(12.dp)) {

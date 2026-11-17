@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "announcements": [
+    {
+      "id": "school-network-20261114",
+      "revision": 1,
+      "title": "学校平台访问提示",
+      "body": "部分校外网络访问学校课堂平台时，可能出现 HTTP 403。\n\n可以尝试：\n1. 连接校园网，或使用学校 SSLVPN。\n2. 检查代理设置是否影响访问。\n3. 在同一网络下用浏览器打开学校平台。\n\n学校平台的实际访问范围以当前服务策略为准。已下载的本地课件仍可离线阅读。",
+      "publishedAt": "2026-11-14T12:00:00+08:00",
+      "expiresAt": null,
+      "minVersionCode": 1,
+      "maxVersionCode": null
+    }
+  ]
+}
