@@ -91,3 +91,11 @@ Actions 归档 app/build/outputs/mapping/release，文件名包含构建提交 S
 - 覆盖安装成功后的课件、登录信息与阅读进度保留，以及旧安装包清理。
 
 参考：[GitHub Releases API](https://docs.github.com/en/rest/releases/releases)、[DownloadManager](https://developer.android.com/reference/android/app/DownloadManager)、[后台启动限制](https://developer.android.com/guide/components/activities/background-starts)、[安装来源授权](https://developer.android.com/reference/android/provider/Settings#ACTION_MANAGE_UNKNOWN_APP_SOURCES)。
+
+## 0.3.4 发布记录（2026-11-17）
+
+- 版本：0.3.4 / versionCode 10，源码提交 `ce2627a03804a2ac7e02b0357e85f3598d3325ad`。
+- GitHub Actions `44013732063` 完成单元测试、Release Lint、R8、正式签名及草稿附件验证；本机同样通过全部 44 项单元测试、Release Lint 和优化构建。
+- 独立 API 36 设备从正式 0.3.3 原地升级到同签名 0.3.4，旧格式课程、课件元数据、图片原件、书签、批注和阅读状态均保留，SQLite 版本维持 1。优化后的应用正常启动并成功读取线上公告。
+- GitHub 与 Kovra 安装包均为 2,881,805 字节，SHA-256 为 `98e8d1efbfbb7b571918de96b3de98583a6f798c9bda4417ee9d6c5e50e9f35f`。公网校验、下载清单、备用链接及 HTTP Range 检查通过；既有公告和 Windows 下载未变化。
+- 正式 APK、校验文件、R8 映射及检查记录已归档至本机 `D:/AndroidDev/Releases/keye-android/v0.3.4/`，不提交二进制或映射文件到 Git。

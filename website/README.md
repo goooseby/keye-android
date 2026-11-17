@@ -83,6 +83,8 @@ python website/sync-downloads.py
 
 脚本从 GitHub 最新正式 Release 获取两个原包并校验，上传后再由服务器复核；安装包发布后最后原子替换 `releases.json`。失败保留旧下载入口，拒绝同版本文件内容被替换；旧版本不自动删除。同步不修改应用源码、GitHub Release 或应用内更新地址。开发缓存与二进制包在忽略的 `app/build/diagnostics/website/download-mirror/`，不进入静态网页源码；`public/downloads/releases.json` 只是本地预览用的初始清单，线上由独立 alias 提供。
 
+2026-11-17 Android 更新至 v0.3.4：同步 GitHub 正式签名 APK，并更新下载清单、主页和 Android 页的备用下载链接。两处 APK 的 SHA-256 均为 `98e8d1efbfbb7b571918de96b3de98583a6f798c9bda4417ee9d6c5e50e9f35f`，大小 2,881,805 字节，断点续传验证通过。网站功能介绍、公告原文和 Windows v0.5.1 保留；前一静态目录和旧安装包保留用于回滚。
+
 ### 主页视觉打磨（2026-11-15）
 
 新增仅主页加载的 `home.css` / `home.js`，避免影响两端介绍页。首屏用 Windows 工作台与 Android 课表原图组成产品展示，缩小标题、调整图文重心；两端卡片统一字号层级、渐变底色、展示区域与留白。底部改为工具使用节奏说明和双栏公告区，添加轻微进入动效，减少动画或禁用脚本时内容直接可见。
