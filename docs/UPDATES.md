@@ -102,3 +102,10 @@ Actions 归档 app/build/outputs/mapping/release，文件名包含构建提交 S
 - 独立 API 36 设备从正式 0.3.3 原地升级到同签名 0.3.4，旧格式课程、课件元数据、图片原件、书签、批注和阅读状态均保留，SQLite 版本维持 1。优化后的应用正常启动并成功读取线上公告。
 - GitHub 与 Kovra 安装包均为 2,881,805 字节，SHA-256 为 `98e8d1efbfbb7b571918de96b3de98583a6f798c9bda4417ee9d6c5e50e9f35f`。公网校验、下载清单、备用链接及 HTTP Range 检查通过；既有公告和 Windows 下载未变化。
 - 正式 APK、校验文件、R8 映射及检查记录已归档至本机 `D:/AndroidDev/Releases/keye-android/v0.3.4/`，不提交二进制或映射文件到 Git。
+
+## 0.3.5 发布记录（2026-11-24）
+
+- 版本为 0.3.5，versionCode 为 11，[源码提交](https://github.com/goooseby/keye-android/commit/331bcbd081e5d41565d7b2b9aaf4f422cf31d6ab)。
+- [GitHub Actions](https://github.com/goooseby/keye-android/actions/runs/45349729302) 完成单元测试、Release Lint、R8 和签名构建。正式包与 0.3.4 的签名一致，并在独立 API 36 模拟器完成覆盖安装与启动验证。
+- GitHub 与 Kovra 安装包均为 2,898,193 字节，SHA-256 为 `9d8b31a320a33f17390f210a68cb5928e0d19d3313c6e3b37895970141311c6c`。网站下载清单、备用链接、断点续传和更新公告均通过公网检查。
+- 正式 APK、校验文件、R8 映射和验证记录归档至 `D:/AndroidDev/Releases/keye-android/v0.3.5/`。

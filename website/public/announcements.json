@@ -2,6 +2,16 @@
   "schemaVersion": 1,
   "announcements": [
     {
+      "id": "android-release-0-3-5",
+      "revision": 1,
+      "title": "华工课栈 0.3.5 更新",
+      "body": "- 新增智能去黑边。\n- 其他功能优化。",
+      "publishedAt": "2026-11-24T07:53:11Z",
+      "expiresAt": null,
+      "minVersionCode": 1,
+      "maxVersionCode": null
+    },
+    {
       "id": "school-network-20261114",
       "revision": 1,
       "title": "学校平台访问提示",
