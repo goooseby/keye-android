@@ -15,7 +15,7 @@ internal data class AnnouncementState(
     val items: List<Announcement> = emptyList(), val readKeys: Set<String> = emptySet(),
     val pending: Announcement? = null, val selected: Announcement? = null,
     val boardOpen: Boolean = false, val checking: Boolean = false,
-    val message: String? = null, val configured: Boolean = false
+    val message: String? = null
 ) {
     val unreadCount get() = items.count { it.key !in readKeys }
 }
@@ -23,7 +23,7 @@ internal data class AnnouncementState(
 internal class AnnouncementViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = AnnouncementRepository(application)
     private val versionCode = application.packageManager.getPackageInfo(application.packageName, 0).longVersionCodeCompat()
-    private val mutable = MutableStateFlow(AnnouncementState(configured = repository.configured))
+    private val mutable = MutableStateFlow(AnnouncementState())
     val state = mutable.asStateFlow()
 
     init { refresh() }
@@ -52,9 +52,14 @@ internal class AnnouncementViewModel(application: Application) : AndroidViewMode
         }
     }
 
-    fun showBoard() { mutable.update { it.copy(boardOpen = true, message = null) }; refresh(manual = true) }
+    fun showBoard() { mutable.update { it.copy(boardOpen = true, message = null) }; refresh() }
     fun closeBoard() { mutable.update { it.copy(boardOpen = false) } }
     fun open(item: Announcement) { mutable.update { it.copy(selected = item) } }
+    fun openFromBoard(item: Announcement) {
+        repository.markRead(item.key)
+        open(item)
+        publish(state.value.items)
+    }
     fun markRead() {
         state.value.selected?.let { repository.markRead(it.key) }
         mutable.update { it.copy(selected = null) }

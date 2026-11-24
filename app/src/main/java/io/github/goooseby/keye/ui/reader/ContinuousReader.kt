@@ -16,7 +16,7 @@ import kotlin.math.abs
 /** A single document viewport. Page heights grow together; vertical scrolling stays lazy. */
 @Composable
 internal fun ContinuousReader(material: StudyMaterial,indices: List<Int>,list: LazyListState,
-    mediaPath: (String)->File,resetToken: Int,onTap: ()->Unit,onZoomed: (Boolean)->Unit) {
+    mediaPath: (String)->File,resetToken: Int,trimBlackBorders: Boolean,onTap: ()->Unit,onZoomed: (Boolean)->Unit) {
     var scale by remember(material.id) {mutableFloatStateOf(1f)}
     var horizontal by remember(material.id) {mutableFloatStateOf(0f)}
     val density=LocalDensity.current
@@ -70,7 +70,7 @@ internal fun ContinuousReader(material: StudyMaterial,indices: List<Int>,list: L
                 items(indices,key={material.pages[it].source+":"+material.pages[it].pdfPage}) {original ->
                     ReaderCanvas(material.pages[original],mediaPath,Modifier.fillMaxWidth(),original+1,
                         continuous=true,active=false,resetToken=0,onTap={},onZoomed={},
-                        gesturesEnabled=false,highResolution=scale>1.01f)
+                        trimBlackBorders=trimBlackBorders,gesturesEnabled=false,highResolution=scale>1.01f)
                 }
             }
         }

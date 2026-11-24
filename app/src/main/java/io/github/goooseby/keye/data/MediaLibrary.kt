@@ -74,7 +74,7 @@ class MediaLibrary(private val context: Context) {
             .also { if (it !== decoded) decoded.recycle() }
     }
 
-    private fun renderPdfPage(renderer: PdfRenderer, index: Int, maxDimension: Int): Bitmap {
+    private fun renderPdfPage(renderer: PdfRenderer, index: Int, maxDimension: Int, forDisplay: Boolean): Bitmap {
         renderer.openPage(index).use { page ->
             val scale = minOf(maxDimension.toFloat() / page.width, maxDimension.toFloat() / page.height)
             val bitmap = Bitmap.createBitmap(
@@ -82,7 +82,8 @@ class MediaLibrary(private val context: Context) {
                 (page.height * scale).toInt().coerceAtLeast(1), Bitmap.Config.ARGB_8888
             )
             bitmap.eraseColor(Color.WHITE)
-            page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_PRINT)
+            val mode = if (forDisplay) PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY else PdfRenderer.Page.RENDER_MODE_FOR_PRINT
+            page.render(bitmap, null, null, mode)
             return bitmap
         }
     }
@@ -182,7 +183,7 @@ class MediaLibrary(private val context: Context) {
         return PageFile(relative(source), relative(preview))
     }
 
-    fun classroomImage(materialId: String,key: String,bytes: ByteArray): PageFile {
+    fun classroomImage(materialId: String,key: String,bytes: ByteArray,prepareReadingBorders: Boolean=false): PageFile {
         require(Regex("[a-f0-9]{64}").matches(key))
         val dir=folder(materialId)
         val prefix="follow-${key}-${newId().take(8)}"
@@ -191,7 +192,10 @@ class MediaLibrary(private val context: Context) {
         try {
             source.writeBytes(bytes)
             val bitmap=decode(source,2400)
-            try {writePreview(bitmap,preview)} finally {bitmap.recycle()}
+            try {
+                if(prepareReadingBorders) readingBlackBorders(source,null,bitmap)
+                writePreview(bitmap,preview)
+            } finally {bitmap.recycle()}
             return PageFile(relative(source),relative(preview),remoteKey=key)
         } catch(error: Exception) {source.delete();preview.delete();throw error}
     }
@@ -204,15 +208,19 @@ class MediaLibrary(private val context: Context) {
         File(root, id).deleteRecursively()
     }
 
-    /** Unfiltered single PDFs are copied; other exports rasterize selected pages. */
-    fun export(materials: List<StudyMaterial>, output: OutputStream, selectedPages: Map<String, Set<Int>>? = null, includeNotes: Boolean=true, progress: (Int, Int) -> Unit) {
+    /** Full single PDFs without page changes are copied; other exports rasterize selected pages. */
+    fun export(materials: List<StudyMaterial>, output: OutputStream, selectedPages: Map<String, Set<Int>>? = null,
+        includeNotes: Boolean=true, trimBlackBorders: Boolean=false, checkCancellation: () -> Unit = {}, progress: (Int, Int) -> Unit) {
         // A direct PDF export keeps text, links, and vector pages intact.
         val single = materials.singleOrNull()
         if (single?.kind == "pdf" && (!includeNotes || single.pageNotes.isEmpty()) && (selectedPages?.get(single.id) ?: ((1..single.pages.size).toSet()-single.excluded)) == (1..single.pages.size).toSet()) {
             val original = single.pages.firstOrNull()?.source ?: error("PDF 中没有页面")
-            file(original).inputStream().use { it.copyTo(output) }
-            progress(single.pages.size, single.pages.size)
-            return
+            val source = file(original)
+            if (!trimBlackBorders || !pdfHasBlackBorders(source, checkCancellation)) {
+                source.inputStream().use { it.copyTo(output) }
+                progress(single.pages.size, single.pages.size)
+                return
+            }
         }
         val selected = materials.flatMap { material ->
             val included=selectedPages?.get(material.id) ?: ((1..material.pages.size).toSet()-material.excluded)
@@ -225,9 +233,11 @@ class MediaLibrary(private val context: Context) {
         val renderers = mutableMapOf<String, Pair<ParcelFileDescriptor, PdfRenderer>>()
         try {
             selected.forEachIndexed { index, (page,note) ->
+                checkCancellation()
+                val source = file(page.source)
                 val original = if (page.pdfPage != null) {
                     val renderer = renderers.getOrPut(page.source) {
-                        val descriptor = ParcelFileDescriptor.open(file(page.source), ParcelFileDescriptor.MODE_READ_ONLY)
+                        val descriptor = ParcelFileDescriptor.open(source, ParcelFileDescriptor.MODE_READ_ONLY)
                         try {
                             descriptor to openPdf(descriptor)
                         } catch (error: Exception) {
@@ -235,9 +245,9 @@ class MediaLibrary(private val context: Context) {
                             throw error
                         }
                     }.second
-                    renderPdfPage(renderer, page.pdfPage, 2400)
-                } else decode(file(page.source), 2400)
-                val bitmap=withPageNote(original,note)
+                    renderPdfPage(renderer, page.pdfPage, 2400, forDisplay = trimBlackBorders)
+                } else decode(source, 2400)
+                val bitmap = outputPageBitmap(source, page.pdfPage, original, trimBlackBorders, note)
                 try {
                     val width = 1240
                     val height = (width.toFloat() * bitmap.height / bitmap.width).toInt().coerceAtLeast(1)
@@ -263,4 +273,16 @@ class MediaLibrary(private val context: Context) {
             document.close()
         }
     }
+
+    private fun pdfHasBlackBorders(source: File, checkCancellation: () -> Unit): Boolean =
+        ParcelFileDescriptor.open(source, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
+            openPdf(descriptor).use { renderer ->
+                (0 until renderer.pageCount).any { page ->
+                    checkCancellation()
+                    val bitmap = renderPdfPage(renderer, page, 2400, forDisplay = true)
+                    try { readingBlackBorders(source, page, bitmap) != BlackBorders.None }
+                    finally { bitmap.recycle() }
+                }
+            }
+        }
 }

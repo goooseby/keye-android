@@ -31,7 +31,7 @@ class ClassroomDemoActivity: ComponentActivity() {
     private lateinit var model:KeyeViewModel
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState);enableEdgeToEdge()
-        if(savedInstanceState==null || !DemoClassroomFeed.initialized) DemoClassroomFeed.reset(application,intent.getIntExtra("pages",2))
+        if(savedInstanceState==null || !DemoClassroomFeed.initialized) DemoClassroomFeed.reset(application,intent.getIntExtra("pages",2),intent.getBooleanExtra("blackBorders",false))
         val factory=object: ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST") override fun <T:ViewModel> create(modelClass: Class<T>): T=KeyeViewModel(application) {DemoClassroomFeed} as T
         }
@@ -60,14 +60,15 @@ private object DemoClassroomFeed: ClassroomPageSource {
     lateinit var entry: ScheduleEntry;private set
     @Volatile var total=2
     @Volatile var offline=false
+    @Volatile private var blackBorders=false
     private lateinit var trace: File
     private val events=JSONArray()
     private val active=AtomicInteger()
     private var maximum=0
-    fun reset(app: Application,count: Int) {
+    fun reset(app: Application,count: Int,bordered: Boolean) {
         val id=newId()
         entry=ScheduleEntry("qa-classroom-$id","qa-classroom-course-$id","课堂跟看演示",LocalDate.now().toString(),"qa","qa")
-        total=count.coerceIn(0,20);offline=false;initialized=true;maximum=0
+        total=count.coerceIn(0,20);offline=false;blackBorders=bordered;initialized=true;maximum=0
         trace=File(app.filesDir,"qa/classroom-trace.json").apply {parentFile?.mkdirs()}
         synchronized(this) {while(events.length()>0) events.remove(0)}
     }
@@ -85,14 +86,22 @@ private object DemoClassroomFeed: ClassroomPageSource {
         record("image:"+page.url.substringAfterLast("page-").substringBefore('.')) {if(offline) throw java.io.IOException("演示网络暂不可用")}
         val number=page.url.substringAfterLast("page-").substringBefore('.').toInt()
         val bitmap=Bitmap.createBitmap(1280,720,Bitmap.Config.ARGB_8888)
-        val canvas=Canvas(bitmap);canvas.drawColor(Color.WHITE)
+        val canvas=Canvas(bitmap)
         val paint=Paint(Paint.ANTI_ALIAS_FLAG)
-        paint.color=Color.rgb(225,242,252);canvas.drawRect(0f,0f,1280f,200f,paint)
+        val contentWidth=if(blackBorders) 960f else 1280f
+        canvas.drawColor(if(blackBorders) Color.rgb(16,16,16) else Color.WHITE)
+        if(blackBorders) {
+            canvas.translate(160f,0f)
+            canvas.clipRect(0f,0f,contentWidth,720f)
+        }
+        paint.color=Color.WHITE;canvas.drawRect(0f,0f,contentWidth,720f,paint)
+        paint.color=Color.rgb(225,242,252);canvas.drawRect(0f,0f,contentWidth,200f,paint)
         paint.color=Color.rgb(0,101,138);paint.textSize=36f;canvas.drawText("KEYE / CLASSROOM DEMO",70f,95f,paint)
         paint.textSize=84f;canvas.drawText("PAGE $number",70f,330f,paint)
         paint.color=Color.rgb(80,96,111);paint.textSize=34f;canvas.drawText("New pages arrive without leaving this slide.",70f,420f,paint)
-        paint.color=Color.rgb(114,81,172);canvas.drawRoundRect(70f,500f,1210f,610f,24f,24f,paint)
-        paint.color=Color.WHITE;paint.textSize=36f;canvas.drawText("Follow latest  /  Browse earlier  /  Keep your notes",100f,568f,paint)
+        paint.color=Color.rgb(114,81,172);canvas.drawRoundRect(70f,500f,contentWidth-70f,610f,24f,24f,paint)
+        paint.color=Color.WHITE;paint.textSize=if(blackBorders) 30f else 36f
+        canvas.drawText("Follow latest  /  Browse earlier  /  Keep your notes",100f,568f,paint)
         return try {ByteArrayOutputStream().use {out ->check(bitmap.compress(Bitmap.CompressFormat.PNG,100,out));out.toByteArray()}} finally {bitmap.recycle()}
     }
 }

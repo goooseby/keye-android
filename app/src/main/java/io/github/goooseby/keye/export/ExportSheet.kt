@@ -42,7 +42,7 @@ fun ExportLocationRow(compact: Boolean=false) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ExportSheet(materials: List<StudyMaterial>,shareOnly: Boolean=false,onDismiss: () -> Unit,onSubmit: (ExportRequest) -> Unit) {
+fun ExportSheet(materials: List<StudyMaterial>,shareOnly: Boolean=false,trimBlackBorders: Boolean=false,onDismiss: () -> Unit,onSubmit: (ExportRequest) -> Unit) {
     val context=LocalContext.current
     val storage=remember { ExportStorage(context) }
     val single=materials.singleOrNull()
@@ -91,7 +91,13 @@ fun ExportSheet(materials: List<StudyMaterial>,shareOnly: Boolean=false,onDismis
                 }
                 locationError?.let { Text(it,color=MaterialTheme.colorScheme.error,style=MaterialTheme.typography.bodySmall) }
             }
-            Text(if(single?.kind=="pdf"&&range==0&&single.excluded.isEmpty()&&(!includeNotes||single.pageNotes.isEmpty())) "保留原始 PDF 的文字与清晰度" else "生成图片型 PDF，所选页面不影响原课件",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+            val fullPdf=single?.kind=="pdf"&&range==0&&single.excluded.isEmpty()&&(!includeNotes||single.pageNotes.isEmpty())
+            Text(when {
+                trimBlackBorders && fullPdf -> "检测到明显黑边时，裁边并生成图片型 PDF"
+                trimBlackBorders -> "裁去明显黑边，生成图片型 PDF"
+                fullPdf -> "保留原始 PDF 的文字与清晰度"
+                else -> "生成图片型 PDF"
+            },style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
             Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(10.dp)) {
                 if(!shareOnly) OutlinedButton(onClick={submit(ExportAction.Save)},enabled=valid,modifier=Modifier.weight(1f).heightIn(min=50.dp),shape=RoundedCornerShape(14.dp)) {Text("导出")}
                 Button(onClick={submit(if(shareOnly) ExportAction.Share else ExportAction.SaveAndShare)},enabled=valid,modifier=Modifier.weight(1f).heightIn(min=50.dp),shape=RoundedCornerShape(14.dp)) {Text(if(shareOnly) "分享 PDF" else "导出并分享")}

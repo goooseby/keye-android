@@ -12,8 +12,8 @@ android {
         applicationId = "io.github.goooseby.keye"
         minSdk = 26
         targetSdk = 35
-        versionCode = providers.gradleProperty("keyeVersionCode").orElse("10").get().toInt()
-        versionName = providers.gradleProperty("keyeVersionName").orElse("0.3.4").get()
+        versionCode = providers.gradleProperty("keyeVersionCode").orElse("11").get().toInt()
+        versionName = providers.gradleProperty("keyeVersionName").orElse("0.3.5").get()
         resValue("string", "announcements_url", providers.gradleProperty("keyeAnnouncementsUrl").orElse("https://keye.kovra.top/announcements.json").get())
     }
 

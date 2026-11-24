@@ -108,6 +108,7 @@ def mirror(product, repo, pattern, magic):
         'mirrorUrl': f'/downloads/{product}/{version}/{asset["name"]}',
         'githubUrl': source_url,
         'releaseUrl': f'https://github.com/goooseby/{repo}/releases/tag/{version}',
+        **({'notes': (release.get('body') or '')[:12_000]} if product == 'android' else {}),
     }
 
 

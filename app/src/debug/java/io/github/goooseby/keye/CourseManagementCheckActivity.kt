@@ -64,6 +64,16 @@ class CourseManagementCheckActivity : ComponentActivity() {
                 check(model.download(listOf(entry("initial"))))
                 waitFor { it.tasks.any { task -> task.type == "download" && task.payload.contains("$prefix-initial") && task.status == "done" } }
                 val material = store.materialBySource(entry("initial").id)!!
+                val initialTask = model.state.value.tasks.first { it.payload.contains("$prefix-initial") }
+                val otherRecords = store.tasks().filterNot { it.id == initialTask.id }.map { it.id }.toSet()
+                model.clearTaskRecords(listOf(initialTask.id))
+                waitFor { it.tasks.none { task -> task.id == initialTask.id } }
+                check(store.task(initialTask.id) == null)
+                check(store.tasks().map { it.id }.toSet() == otherRecords)
+                check(store.material(material.id) == material && MediaLibrary(application).file(material.pages.first().source).isFile)
+                model.retryTask(initialTask.id)
+                check(store.task(initialTask.id) == null)
+                checked += "single-task-clear-preserves-material-and-other-records"
                 check(model.download(listOf(entry("retry"))))
                 val failed = waitFor { it.tasks.any { task -> task.payload.contains("$prefix-retry") && task.status == "failed" } }
                     .tasks.first { it.payload.contains("$prefix-retry") }
@@ -111,6 +121,14 @@ class CourseManagementCheckActivity : ComponentActivity() {
                 check(model.download(listOf(entry("blocked"))))
                 waitFor { it.tasks.any { task -> task.payload.contains("$prefix-blocked") && task.status == "running" } }
                 check(runCatching { model.removeManagedCourse(course, members(), true) }.isFailure)
+                val activeTask = model.state.value.tasks.first { it.payload.contains("$prefix-blocked") }
+                val ended = model.state.value.tasks.filter { it.payload.contains(prefix) && it.clearable }.map { it.id }.toSet()
+                check(ended.isNotEmpty())
+                model.clearTaskRecords(ended.toList() + activeTask.id)
+                waitFor { it.tasks.none { task -> task.id in ended } }
+                check(ended.all { store.task(it) == null } && store.task(activeTask.id)?.status == "running")
+                check(MediaLibrary(application).file(saved.pages.first().source).isFile)
+                checked += "batch-task-clear-keeps-active-work-and-materials"
                 release.countDown()
                 waitFor { it.tasks.any { task -> task.payload.contains("$prefix-blocked") && task.status == "done" } }
                 checked += "running-download-blocks-removal"

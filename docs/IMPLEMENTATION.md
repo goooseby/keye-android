@@ -37,7 +37,9 @@ LibraryStore 在现有 settings 表按账号摘要与周保存 CachedSchedule（
 
 ## 课堂跟看与页批注
 
-ClassroomScreen 是独立的课堂观看状态，复用 ReaderCanvas 与全屏播放器控件。ClassroomSession 表达连接、等待、已连接、暂停、重试、需要登录与结束；跟随开关属于观看状态，通过可保存状态保留，手动翻页和拖动交互暂停跟随，后台同步暂停与回看互不混淆。原始页码通过 retainedPageIndices 映射，移除页不重新出现在跟看中。
+ClassroomScreen 是独立的课堂观看状态，复用 ReaderCanvas 与全屏播放器控件。ClassroomSession 表达连接、等待、已连接、暂停、重试、需要登录与结束；跟随开关属于观看状态，通过可保存状态保留。最新页缩放保持跟随，滑动在 Pager 停稳后按页面来源判断是否翻页；手动翻页和拖动页码暂停跟随。原始页码通过 retainedPageIndices 映射，移除页不重新出现在跟看中。
+
+去黑边检测先探测成对边缘的直度、厚度和明暗变化，再逐像素核对裁掉的区域。课堂同步用生成预览时已解码的位图预热裁边结果；ReaderCanvas 按源文件、页码、修改时间与解码尺寸缓存边界，再用同一原图位图绘制子区域。保存图片、分享和 PDF 导出共用检测结果，先裁边再添加批注。
 
 KeyeViewModel 的跟看工作通过单个 Mutex 串行执行，代际编号与协程取消共同阻止旧请求在切换后写回；不可取消的旧 HTTP 完成前，新会话也不能并发进入。默认每三秒检查一次；历史补齐每批最多三页，按最新优先下载，批次间检查新目录。补页批次扣除已处理时间再等待，其余正常轮询在请求完成后等待间隔，始终串行。异常指数退避至三十秒，HTTP 429 采用 Retry-After（最长五分钟）。ClassroomPageSource 分离接口调用，正式实现校验账号归属，Debug 演示源仅用于确定性增页和断网检查，不包含在 Release 包。
 
@@ -51,7 +53,7 @@ StudyMaterial 的 schoolEntry 和 pageNotes 是兼容的 JSON 可选字段，数
 
 ExportSheet 处理文件名、全部／当前／指定范围与保存位置。范围支持英文或中文逗号、连续区间和去重，按原页序输出。ExportRequest 保存本次范围，selectExportPages 与课件的持久移除状态取交集；合并范围按传入课件顺序累计原始页码。指定范围只包含已移除页时不能导出。
 
-KeyeViewModel 控制生成、取消和状态。MediaLibrary 完整导出未移除页面的单份 PDF 时直接复制原件，保留文字和矢量；部分页、合并或图片课件输出图片型 PDF。生成时使用原件而非列表缩略图。先生成缓存，再写入目标，写入循环检查取消；失败清理本次创建的输出，默认不覆盖同名文件。
+KeyeViewModel 控制生成、取消和状态。MediaLibrary 完整导出未移除页面的单份 PDF 且无裁边、无批注时直接复制原件，保留文字和矢量；部分页、合并、裁边或图片课件输出图片型 PDF。生成时使用原件。先生成缓存，再写入目标，写入循环检查取消；失败清理本次创建的输出，默认保留已有同名文件。
 
 ExportStorage 使用以下位置：
 
@@ -85,9 +87,11 @@ Debug 的 UiGalleryActivity 提供 page=login-error 检查入口，默认使用�
 
 导入保留来源 URI 授权，支持取消及重试。原件被移动或授权失效时提示重新选择。任务在进程中运行，中断后下次启动标记失败。
 
+任务记录清理：行尾垃圾桶与顶部“清除已结束”分别支持单条和当前筛选批量清理。LibraryStore 通过事务删除已结束记录；ViewModel 串行处理清理与状态写回，晚到的完成／取消回写不会重建记录。新导入显式创建任务，重试先检查原记录仍存在；清理不操作课件或导出文件。
+
 ## 应用更新
 
-AppUpdateManager 独立管理公开 GitHub Releases 元数据、ETag、每日检查记录、忽略偏好、DownloadManager 任务和安装包。UpdatePolicy 使用纯逻辑验证稳定版本、每日门限、仓库地址和签名集合。AppUpdateViewModel 用互斥锁串行恢复、下载、校验与安装准备，不将系统下载任务绑定到界面生命周期；AppUpdateHost 仅在前台查询本机下载状态，不借轮询请求 GitHub。
+AppUpdateManager 并行读取阿里云镜像清单与 GitHub Releases，各自缓存 ETag。UpdatePolicy 比较版本和同版本摘要，优先选匹配的镜像。下载操作与后台失败广播共用互斥锁，下载地址及任务编号持久保存。AppUpdateHost 的前台轮询查询本机任务；镜像 HTTP 或传输失败后切换到 GitHub，系统继续负责实际下载。
 
 下载完成后的私有副本通过大小、SHA-256、包名、版本、最低系统和签名校验，安装前再次复核。UpdateDownloadReceiver 只查询匹配任务并发送完成通知，真正安装由前台 MainActivity 处理。拒绝权限和取消安装不会删除有效安装包。应用更新的任务与课件下载独立，不能清理课程文件。签名配置仅从环境变量读取；正式发布流程及检查边界见 [UPDATES.md](UPDATES.md)。
 

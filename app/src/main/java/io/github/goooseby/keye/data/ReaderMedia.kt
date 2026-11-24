@@ -6,7 +6,36 @@ import android.graphics.Matrix
 import android.graphics.pdf.PdfRenderer
 import android.media.ExifInterface
 import android.os.ParcelFileDescriptor
+import android.util.LruCache
 import java.io.File
+
+private data class BorderCacheKey(val path: String, val modified: Long, val pdfPage: Int?, val width: Int, val height: Int)
+private val readingBorderCache = LruCache<BorderCacheKey, BlackBorders>(512)
+
+internal fun readingBlackBorders(file: File, pdfPage: Int?, bitmap: Bitmap): BlackBorders {
+    if (bitmap.config == Bitmap.Config.HARDWARE) return BlackBorders.None
+    val key = BorderCacheKey(file.path, file.lastModified(), pdfPage, bitmap.width, bitmap.height)
+    return readingBorderCache.get(key) ?: detectBlackBorders(bitmap.width, bitmap.height) { x, y, width, height, destination ->
+        bitmap.getPixels(destination, 0, width, x, y, width, height)
+    }.also { readingBorderCache.put(key, it) }
+}
+
+/** Takes ownership of the decoded bitmap and appends the note after applying the crop. */
+internal fun outputPageBitmap(file: File, pdfPage: Int?, bitmap: Bitmap, trimBlackBorders: Boolean, note: String): Bitmap {
+    val content = if (trimBlackBorders) {
+        try {
+            val borders = readingBlackBorders(file, pdfPage, bitmap)
+            if (borders == BlackBorders.None) bitmap else Bitmap.createBitmap(
+                bitmap, borders.left, borders.top, bitmap.width - borders.left - borders.right,
+                bitmap.height - borders.top - borders.bottom
+            ).also { if (it !== bitmap) bitmap.recycle() }
+        } catch (failure: Exception) {
+            bitmap.recycle()
+            throw failure
+        }
+    } else bitmap
+    return withPageNote(content, note)
+}
 
 /** Decode originals for reading/sharing, independently from small list thumbnails. */
 internal fun renderReadingPage(file: File,pdfPage: Int?,maxSize: Int): Bitmap? {

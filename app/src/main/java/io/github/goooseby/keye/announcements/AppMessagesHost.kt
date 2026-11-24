@@ -11,6 +11,9 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -18,6 +21,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import io.github.goooseby.keye.ui.components.AppIcon
 import io.github.goooseby.keye.ui.components.SheetHeading
 import io.github.goooseby.keye.update.AppUpdateHost
+import io.github.goooseby.keye.update.AppUpdateState
 import io.github.goooseby.keye.update.AppUpdateViewModel
 import java.time.Instant
 import java.time.ZoneId
@@ -48,12 +52,21 @@ internal fun AppMessagesHost(updates: AppUpdateViewModel, notices: AnnouncementV
     }
     AppUpdateHost(updates, canPrompt = canPrompt && !noticeOpen, automaticPromptAllowed = showUpdate)
     // Explicit update actions take precedence. Keep the notice ready to return to.
-    if (resumed && !updateOpen) AnnouncementHost(notices)
+    if (resumed && !updateOpen) AnnouncementHost(notices, update, updates::showDetails, { updates.check() })
+}
+
+@Composable
+internal fun MessageInboxButton(unreadCount: Int, onClick: () -> Unit) {
+    IconButton(onClick = onClick) {
+        BadgedBox(badge = { if (unreadCount > 0) UnreadMessageDot() }) {
+            AppIcon("mail", if (unreadCount > 0) "消息，${unreadCount} 条未读" else "消息")
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun AnnouncementHost(model: AnnouncementViewModel) {
+private fun AnnouncementHost(model: AnnouncementViewModel, update: AppUpdateState, onUpdate: () -> Unit, refreshUpdates: () -> Unit) {
     val state by model.state.collectAsState()
     val selected = state.selected
     if (selected != null) {
@@ -72,28 +85,56 @@ internal fun AnnouncementHost(model: AnnouncementViewModel) {
             dismissButton = { if (!read) TextButton(onClick = model::later) { Text("稍后提醒") } }
         )
     } else if (state.boardOpen) {
+        val unreadCount = state.unreadCount + if (update.unreadRelease) 1 else 0
+        val checking = state.checking || update.checking || update.initializing
         ModalBottomSheet(onDismissRequest = model::closeBoard, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
             Column(Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                SheetHeading("应用公告", model::closeBoard)
+                SheetHeading("消息", model::closeBoard)
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text(if (state.unreadCount > 0) "${state.unreadCount} 条未读" else "通知与使用说明", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    TextButton(onClick = { model.refresh(manual = true) }, enabled = state.configured && !state.checking) { Text(if (state.checking) "刷新中" else "刷新") }
+                    Box(Modifier.weight(1f)) {
+                        if (unreadCount > 0) Text("${unreadCount} 条未读", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    TextButton(onClick = { model.refresh(manual = true); refreshUpdates() }, enabled = !checking) { Text(if (checking) "刷新中" else "刷新") }
                 }
                 state.message?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-                if (state.items.isEmpty()) {
-                    Text(if (state.checking) "正在获取公告…" else "暂无公告", Modifier.padding(vertical = 32.dp), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (state.items.isEmpty() && update.release == null) {
+                    Text(if (checking) "正在获取消息…" else "暂无消息", Modifier.padding(vertical = 32.dp), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } else LazyColumn(Modifier.fillMaxWidth().heightIn(max = 480.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    items(state.items, key = { it.key }) { item ->
-                        Column(Modifier.fillMaxWidth().clickable { model.open(item) }.padding(vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(item.title, style = MaterialTheme.typography.titleSmall)
-                            Text((if (item.key !in state.readKeys) "未读 · " else "") + announcementDate(item.publishedAt), style = MaterialTheme.typography.labelMedium, color = if (item.key !in state.readKeys) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                    update.release?.let { release ->
+                        item(key = "application-update") {
+                            MessageRow("新版本 ${release.version}", "应用更新", update.unreadRelease, onUpdate)
                         }
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .5f))
+                    }
+                    items(state.items, key = { it.key }) { item ->
+                        MessageRow(item.title, announcementDate(item.publishedAt), item.key !in state.readKeys) { model.openFromBoard(item) }
                     }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun MessageRow(title: String, subtitle: String, unread: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onClick)
+            .semantics { stateDescription = if (unread) "未读" else "已读" }
+            .padding(vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(title, style = MaterialTheme.typography.titleSmall)
+            Text(subtitle, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        if (unread) UnreadMessageDot()
+    }
+    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = .5f))
+}
+
+@Composable
+private fun UnreadMessageDot() {
+    Badge(containerColor = MaterialTheme.colorScheme.error)
 }
 
 private fun announcementDate(millis: Long): String = DateTimeFormatter.ofPattern("yyyy.MM.dd")

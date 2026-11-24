@@ -36,6 +36,17 @@ class LibraryStore private constructor(context: Context) : SQLiteOpenHelper(cont
     fun materials(): List<StudyMaterial> = all("materials").map(StudyMaterial::from)
     fun tasks(): List<TaskRecord> = all("tasks").map(TaskRecord::from)
 
+    fun task(id: String): TaskRecord? =
+        readableDatabase.rawQuery("SELECT data FROM tasks WHERE id=?", arrayOf(id)).use { cursor ->
+            if (cursor.moveToFirst()) TaskRecord.from(JSONObject(cursor.getString(0))) else null
+        }
+
+    fun removeTaskRecords(ids: List<String>): Set<String> = transaction {
+        ids.distinct().filter { task(it)?.clearable == true }.onEach {
+            writableDatabase.delete("tasks", "id=?", arrayOf(it))
+        }.toSet()
+    }
+
     fun material(id: String): StudyMaterial? =
         readableDatabase.rawQuery("SELECT data FROM materials WHERE id=?", arrayOf(id)).use { cursor ->
             if (cursor.moveToFirst()) StudyMaterial.from(JSONObject(cursor.getString(0))) else null

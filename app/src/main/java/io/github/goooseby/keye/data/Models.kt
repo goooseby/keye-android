@@ -167,6 +167,7 @@ data class TaskRecord(
     val batchOrder: Int = 0,
     val updatedAt: Long = System.currentTimeMillis()
 ) {
+    val clearable get() = status in setOf("done", "failed", "cancelled")
     fun json() = JSONObject().put("id", id).put("type", type).put("title", title)
         .put("status", status).put("progress", progress).put("message", message)
         .put("payload", payload).put("materialId", materialId).put("updatedAt", updatedAt)

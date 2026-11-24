@@ -31,6 +31,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
@@ -38,14 +39,17 @@ import androidx.compose.ui.platform.*
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import io.github.goooseby.keye.KeyeViewModel
+import io.github.goooseby.keye.data.BlackBorders
 import io.github.goooseby.keye.data.PageFile
 import io.github.goooseby.keye.data.ScheduleEntry
 import io.github.goooseby.keye.data.StudyMaterial
+import io.github.goooseby.keye.data.readingBlackBorders
 import io.github.goooseby.keye.data.renderReadingPage
 import io.github.goooseby.keye.domain.retainedPageIndices
 import io.github.goooseby.keye.domain.visiblePositionForPage
@@ -68,6 +72,7 @@ import kotlinx.coroutines.flow.*
 fun ReaderScreen(material: StudyMaterial,model: KeyeViewModel,mediaPath: (String) -> File,onBack: () -> Unit,onExport: () -> Unit,onShare: () -> Unit,exportState: ExportState?,onClassroom: ((ScheduleEntry)->Unit)?=null) {
     if(material.pages.isEmpty()) { EmptyState("error","课件没有可读取的页面",action="返回",onAction=onBack);return }
     val pageActive=LocalPageActive.current
+    val trimBlackBorders by model.trimBlackBorders.collectAsState()
     val context=LocalContext.current
     val activity=context as Activity
     val prefs=remember {context.getSharedPreferences("reading",Context.MODE_PRIVATE)}
@@ -236,10 +241,10 @@ fun ReaderScreen(material: StudyMaterial,model: KeyeViewModel,mediaPath: (String
             }
         }
         Box(Modifier.weight(1f).fillMaxWidth()) {
-            if(effectiveMode=="continuous") ContinuousReader(material,visibleIndices,list,mediaPath,resetToken,
+            if(effectiveMode=="continuous") ContinuousReader(material,visibleIndices,list,mediaPath,resetToken,trimBlackBorders,
                 onTap={chrome=!chrome},onZoomed={zoomed=it}) else HorizontalPager(pager,userScrollEnabled=!zoomed,modifier=Modifier.fillMaxSize(),beyondViewportPageCount=1,key={visibleIndices[it]}) {position ->
                 val original=visibleIndices[position]
-                ReaderCanvas(material.pages[original],mediaPath,Modifier.fillMaxSize(),pageNumber=original+1,continuous=false,active=original==current,resetToken=resetToken,onTap={chrome=!chrome},onZoomed={if(original==current) zoomed=it})
+                ReaderCanvas(material.pages[original],mediaPath,Modifier.fillMaxSize(),pageNumber=original+1,continuous=false,active=original==current,resetToken=resetToken,onTap={chrome=!chrome},onZoomed={if(original==current) zoomed=it},trimBlackBorders=trimBlackBorders)
             }
             if(!fullscreen&&!chrome) Surface(onClick={panel="pages"},shape=RoundedCornerShape(30.dp),color=Color.Black.copy(alpha=.5f),contentColor=Color.White,modifier=Modifier.align(Alignment.BottomEnd).padding(12.dp)) {
                 Text("${current+1} / ${material.pages.size}",Modifier.padding(horizontal=12.dp,vertical=6.dp),style=MaterialTheme.typography.labelSmall)
@@ -363,6 +368,11 @@ fun ReaderScreen(material: StudyMaterial,model: KeyeViewModel,mediaPath: (String
             Text("阅读方式",style=MaterialTheme.typography.labelLarge)
             if(fullscreen) Text("全屏采用横向逐页；退出后恢复常规阅读方式",style=MaterialTheme.typography.bodyMedium)
             else PillTabs(listOf("连续阅读","逐页阅读"),if(mode=="continuous") 0 else 1,{changeMode(if(it==0) "continuous" else "pages")})
+            BlackBorderSwitch(trimBlackBorders) {
+                if(effectiveMode=="continuous") list.requestScrollToItem(list.firstVisibleItemIndex)
+                resetToken++
+                model.setTrimBlackBorders(it)
+            }
             Text("阅读背景",style=MaterialTheme.typography.labelLarge)
             Row(horizontalArrangement=Arrangement.spacedBy(12.dp)) {
                 colors.forEachIndexed {index,color ->
@@ -429,24 +439,25 @@ fun ReaderScreen(material: StudyMaterial,model: KeyeViewModel,mediaPath: (String
     if(panel=="delete") AlertDialog(onDismissRequest={panel=null},title={Text("移入回收站？")},text={Text("课件可以在“我的”的回收站中恢复。")},confirmButton={TextButton(onClick={model.setDeleted(material.id,true);panel=null;onBack()}){Text("移入")}},dismissButton={TextButton(onClick={panel=null}){Text("取消")}})
 }
 
-private data class ReaderBitmap(val bitmap: Bitmap?=null,val finished: Boolean=false)
+private data class ReaderBitmap(val bitmap: Bitmap?=null,val borders: BlackBorders=BlackBorders.None,val finished: Boolean=false)
 private val readerCache=object:android.util.LruCache<String,Bitmap>(40*1024*1024) {override fun sizeOf(key:String,value:Bitmap)=value.allocationByteCount}
 
 @Composable
-internal fun ReaderCanvas(page: PageFile,mediaPath: (String) -> File,modifier: Modifier,pageNumber: Int,continuous: Boolean,active: Boolean,resetToken: Int,onTap: () -> Unit,onZoomed: (Boolean) -> Unit,gesturesEnabled: Boolean=true,highResolution: Boolean=false) {
+internal fun ReaderCanvas(page: PageFile,mediaPath: (String) -> File,modifier: Modifier,pageNumber: Int,continuous: Boolean,active: Boolean,resetToken: Int,onTap: () -> Unit,onZoomed: (Boolean) -> Unit,trimBlackBorders: Boolean,gesturesEnabled: Boolean=true,highResolution: Boolean=false) {
     var scale by remember(page.source,page.pdfPage) {mutableFloatStateOf(1f)}
     var offset by remember(page.source,page.pdfPage) {mutableStateOf(Offset.Zero)}
     var bounds by remember {mutableStateOf(IntSize.Zero)}
     val source=mediaPath(page.source)
     val maxSize=if(highResolution || scale>1.01f) 3000 else 1800
-    val loaded by produceState(ReaderBitmap(),source.path,page.pdfPage,maxSize) {
-        val key="${source.path}:${source.lastModified()}:${page.pdfPage}:$maxSize"
-        val bitmap=withContext(Dispatchers.IO) {
-            readerCache.get(key) ?: runCatching {
+    val loaded by produceState(ReaderBitmap(),source.path,page.pdfPage,maxSize,trimBlackBorders) {
+        value=withContext(Dispatchers.IO) {
+            val key="${source.path}:${source.lastModified()}:${page.pdfPage}:$maxSize"
+            val bitmap=readerCache.get(key) ?: runCatching {
                 renderReadingPage(source,page.pdfPage,maxSize)
             }.getOrNull()?.also {readerCache.put(key,it)}
+            val borders=if(trimBlackBorders && bitmap!=null) readingBlackBorders(source,page.pdfPage,bitmap) else BlackBorders.None
+            ReaderBitmap(bitmap,borders,finished=true)
         }
-        value=ReaderBitmap(bitmap,true)
     }
     LaunchedEffect(resetToken) {scale=1f;offset=Offset.Zero}
     LaunchedEffect(active) {if(!active){scale=1f;offset=Offset.Zero}}
@@ -458,19 +469,24 @@ internal fun ReaderCanvas(page: PageFile,mediaPath: (String) -> File,modifier: M
         offset=Offset(next.x.coerceIn(-bounds.width*(scale-1)/2,bounds.width*(scale-1)/2),next.y.coerceIn(-bounds.height*(scale-1)/2,bounds.height*(scale-1)/2))
     }
     val bitmap=loaded.bitmap
+    val borders=if(trimBlackBorders) loaded.borders else BlackBorders.None
+    val painter=remember(bitmap,borders) {bitmap?.let {
+        BitmapPainter(it.asImageBitmap(),IntOffset(borders.left,borders.top),
+            IntSize(it.width-borders.left-borders.right,it.height-borders.top-borders.bottom))
+    }}
     val previewAspect=remember(page.preview) {
         val bounds=BitmapFactory.Options().apply {inJustDecodeBounds=true}
         BitmapFactory.decodeFile(mediaPath(page.preview).path,bounds)
         if(bounds.outWidth>0 && bounds.outHeight>0) bounds.outWidth.toFloat()/bounds.outHeight else 16f/9f
     }
-    val aspect=bitmap?.let {it.width.toFloat()/it.height} ?: previewAspect
+    val aspect=painter?.intrinsicSize?.let {it.width/it.height} ?: previewAspect
     Box(modifier.then(if(continuous) Modifier.aspectRatio(aspect) else Modifier).clipToBounds().onSizeChanged {bounds=it}
         .then(if(gesturesEnabled) Modifier.transformable(transform,canPan={scale>1.01f}) else Modifier)
         .then(if(gesturesEnabled) Modifier.pointerInput(page.source,page.pdfPage) {detectTapGestures(onTap={currentTap()},onDoubleTap={point ->
             scale=if(scale>1.01f) 1f else 2.5f
             offset=if(scale==1f) Offset.Zero else Offset((bounds.width/2-point.x)*(scale-1),(bounds.height/2-point.y)*(scale-1))
         })} else Modifier),contentAlignment=Alignment.Center) {
-        if(bitmap!=null) Image(bitmap.asImageBitmap(),"第${pageNumber}页课件",Modifier.fillMaxSize().graphicsLayer {scaleX=scale;scaleY=scale;translationX=offset.x;translationY=offset.y},contentScale=ContentScale.Fit)
+        if(painter!=null) Image(painter,"第${pageNumber}页课件",Modifier.fillMaxSize().graphicsLayer {scaleX=scale;scaleY=scale;translationX=offset.x;translationY=offset.y},contentScale=ContentScale.Fit)
         else if(!loaded.finished) CircularProgressIndicator(Modifier.size(22.dp),strokeWidth=2.dp)
         else Text("页面无法读取",color=MaterialTheme.colorScheme.error,modifier=Modifier.padding(16.dp))
     }

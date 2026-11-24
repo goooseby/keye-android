@@ -16,7 +16,7 @@ class CourseManagementTest {
         title = id, day = "2026-11-17", courseId = course.id, kind = "images",
         pages = listOf(PageFile("original-$id", "preview-$id")), lastPage = 1, readAt = 100,
         bookmarks = setOf(1), pageNotes = mapOf(1 to "重点"), revision = 4, exportRevision = 4,
-        exportUri = "content://export", deleted = deleted)
+        exportUri = "content://export", deleted = deleted, touched = 100)
 
     @Test fun dissolveDetachesActiveAndPreviouslyDeletedMaterialsWithoutChangingContent() {
         val active = material("active")

@@ -60,6 +60,7 @@ import kotlinx.coroutines.flow.*
 fun ClassroomScreen(session: ClassroomSession,material: StudyMaterial?,state: UiState,model: KeyeViewModel,
                     mediaPath: (String)->File,onBack: ()->Unit,onLogin: ()->Unit) {
     val pageActive=LocalPageActive.current
+    val trimBlackBorders by model.trimBlackBorders.collectAsState()
     val context=LocalContext.current
     val activity=context as Activity
     val owner=LocalLifecycleOwner.current
@@ -87,6 +88,7 @@ fun ClassroomScreen(session: ClassroomSession,material: StudyMaterial?,state: Ui
     val current=pager.currentPage.coerceIn(0,(count-1).coerceAtLeast(0))
     val currentPage=(originalIndices.getOrNull(current) ?: 0)+1
     val dragged by pager.interactionSource.collectIsDraggedAsState()
+    var swipeStartKey by remember(session.entry.id) {mutableStateOf<Any?>(null)}
     val scope=rememberCoroutineScope()
     val snackbar=remember {SnackbarHostState()}
     val saveLocation=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("image/png")) {uri ->
@@ -131,9 +133,28 @@ fun ClassroomScreen(session: ClassroomSession,material: StudyMaterial?,state: Ui
             if(!activity.isChangingConfigurations) {bars.show(WindowInsetsCompat.Type.systemBars());activity.requestedOrientation=ActivityInfo.SCREEN_ORIENTATION_PORTRAIT}
         }
     }
-    LaunchedEffect(dragged) {if(dragged) following=false}
+    LaunchedEffect(pager,session.entry.id) {
+        snapshotFlow {dragged}.collectLatest {dragging ->
+            if(dragging) {
+                if(following && swipeStartKey==null) {
+                    val start=pager.settledPage
+                    if(start<latestCount-1) following=false
+                    else swipeStartKey=pager.layoutInfo.visiblePagesInfo.firstOrNull {it.index==start}?.key
+                }
+            } else {
+                val startKey=swipeStartKey ?: return@collectLatest
+                // Drag stop is emitted before the pager starts its snap animation.
+                withFrameNanos {}
+                snapshotFlow {!pager.isScrollInProgress}.first {it}
+                val settledKey=pager.layoutInfo.visiblePagesInfo.firstOrNull {it.index==pager.settledPage}?.key
+                if(settledKey!=null && settledKey!=startKey) following=false
+                swipeStartKey=null
+            }
+        }
+    }
     LaunchedEffect(count,following) {
         if(count>0) {
+            if(following) snapshotFlow {!dragged && swipeStartKey==null}.first {it}
             val target=classroomAppendTarget(following,pager.currentPage,count)
             if(following || pager.currentPage>=count) {resetToken++;pager.scrollToPage(target)}
             if(following) seenCount=session.remoteCount
@@ -156,7 +177,14 @@ fun ClassroomScreen(session: ClassroomSession,material: StudyMaterial?,state: Ui
         if(fullscreen && output?.result?.mime=="image/png") snackbar.showSnackbar("当前页已保存到 ${output.result.location}")
         else if(fullscreen && output?.failed==true) snackbar.showSnackbar(output.message)
     }
-    LaunchedEffect(pageActive,state.notice) {if(pageActive) state.notice?.let {snackbar.showSnackbar(it);if(model.state.value.notice==it) model.notice(null)}}
+    LaunchedEffect(pageActive,state.notice,state.noticeVersion) {
+        if(!pageActive) return@LaunchedEffect
+        val message=state.notice ?: return@LaunchedEffect
+        val version=state.noticeVersion
+        snackbar.currentSnackbarData?.dismiss()
+        snackbar.showSnackbar(message)
+        model.dismissNotice(message,version)
+    }
     Column(Modifier.fillMaxSize().background(if(fullscreen) Color.Black else MaterialTheme.colorScheme.surfaceContainer)) {
         if(!fullscreen) Surface {
             Column(Modifier.statusBarsPadding()) {
@@ -194,7 +222,7 @@ fun ClassroomScreen(session: ClassroomSession,material: StudyMaterial?,state: Ui
             if(count==0 || material?.deleted==true) EmptyState("live",if(material?.deleted==true) "课件已移入回收站" else "等待课件页面",detail=if(session.stage==ClassroomStage.NeedsLogin) "登录后可继续同步" else "新页面出现后会显示在这里",modifier=Modifier.align(Alignment.Center))
             else HorizontalPager(pager,Modifier.fillMaxSize(),userScrollEnabled=!zoomed,beyondViewportPageCount=1,key={pages[it].source}) {position ->
                 ReaderCanvas(pages[position],mediaPath,Modifier.fillMaxSize(),originalIndices[position]+1,false,position==current,resetToken,
-                    onTap={if(fullscreen) chrome=!chrome},onZoomed={if(position==current) {zoomed=it;if(it) following=false}})
+                    onTap={if(fullscreen) chrome=!chrome},onZoomed={if(position==current) {zoomed=it;if(it && position<count-1) following=false}},trimBlackBorders=trimBlackBorders)
             }
             if(fullscreen && count>0 && material!=null) {
                 FullscreenReaderControls(chrome,"${if(following) "跟随中" else "回看中"} · ${session.entry.title}",current,currentPage,material.pages.size,count,currentPage in material.bookmarks,zoomed,
@@ -254,6 +282,7 @@ fun ClassroomScreen(session: ClassroomSession,material: StudyMaterial?,state: Ui
             SheetHeading("课堂跟看",{panel=null})
             Text("检查频率",style=MaterialTheme.typography.labelLarge)
             PillTabs(listOf("3 秒","5 秒","10 秒"),listOf(3,5,10).indexOf(session.intervalSeconds).coerceAtLeast(0),{model.classroomInterval(listOf(3,5,10)[it])})
+            BlackBorderSwitch(trimBlackBorders) {model.setTrimBlackBorders(it);resetToken++}
             Text("仅在此界面处于前台时检查。网络异常会降低检查频率；已获取页面自动保存在课程中。",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
             if(session.checkedAt>0) Text("上次同步 "+DateTimeFormatter.ofPattern("HH:mm:ss").withZone(ZoneId.systemDefault()).format(Instant.ofEpochMilli(session.checkedAt)),style=MaterialTheme.typography.bodySmall)
             PreferenceRow(if(session.stage==ClassroomStage.Paused) "live" else "pause",if(session.stage==ClassroomStage.Paused) "继续同步" else "暂停同步",onClick={if(session.stage==ClassroomStage.Paused) model.resumeClassroom() else model.pauseClassroom();panel=null})
@@ -261,7 +290,7 @@ fun ClassroomScreen(session: ClassroomSession,material: StudyMaterial?,state: Ui
         }
     }
     if(endConfirmation) AlertDialog(onDismissRequest={endConfirmation=false},title={Text("结束本次跟看？")},text={Text("已获取的页面和批注会保留在课程中，之后也可重新连接此课次。")},confirmButton={TextButton(onClick={model.endClassroom();endConfirmation=false;onBack()}) {Text("结束并保留")}},dismissButton={TextButton(onClick={endConfirmation=false}) {Text("继续跟看")}})
-    exportSnapshot?.let {snapshot ->ExportSheet(listOf(snapshot),onDismiss={exportSnapshot=null},onSubmit={model.export(it.copy(origin=snapshot.id));exportSnapshot=null})}
+    exportSnapshot?.let {snapshot ->ExportSheet(listOf(snapshot),trimBlackBorders=trimBlackBorders,onDismiss={exportSnapshot=null},onSubmit={model.export(it.copy(origin=snapshot.id),trimBlackBorders);exportSnapshot=null})}
 }
 
 @Composable

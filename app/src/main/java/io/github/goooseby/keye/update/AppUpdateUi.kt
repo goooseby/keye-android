@@ -96,15 +96,17 @@ internal fun AppUpdateHost(model: AppUpdateViewModel,canPrompt: Boolean,automati
                 IconBadge("refresh")
                 Column(Modifier.weight(1f)) {
                     Text("华工课栈 ${state.version}",style=MaterialTheme.typography.titleMedium)
-                    Text("GitHub Releases",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 TextButton(onClick={model.check()},enabled=!state.checking) {Text(if(state.checking) "检查中" else "检查更新")}
             }
             state.message?.let {Text(it,color=MaterialTheme.colorScheme.onSurfaceVariant,style=MaterialTheme.typography.bodyMedium)}
             state.release?.let {release ->
+                LaunchedEffect(release.version) {model.markReleaseRead(release.version)}
                 HorizontalDivider()
                 Text("新版本 ${release.version}",style=MaterialTheme.typography.titleMedium)
                 Text(release.notes.ifBlank {"此版本提供功能改进与问题修复。"},style=MaterialTheme.typography.bodyMedium)
+                val source=state.download.source ?: if(release.mirrorUrl!=null) "阿里云镜像优先" else "GitHub"
+                Text("下载来源 · $source",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                 Text("${updateSize(release.size)} · 下载可能使用移动数据，漫游时等待网络",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                 when(state.download.stage) {
                     UpdateDownloadStage.Downloading -> {

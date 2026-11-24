@@ -28,17 +28,28 @@ import java.util.Locale
 @Composable
 fun TasksScreen(tasks: List<TaskRecord>,model: KeyeViewModel,onOpen: (String) -> Unit,onOutput: (String) -> Unit) {
     var filter by rememberSaveable{mutableIntStateOf(0)}
+    val current = remember(tasks,filter) { filteredTasks(tasks,filter) }
     Column(Modifier.fillMaxSize()) {
         PillTabs(listOf("全部","进行中","未完成"),filter,{filter=it},Modifier.padding(horizontal=20.dp,vertical=4.dp))
+        Row(Modifier.fillMaxWidth().padding(horizontal=20.dp),verticalAlignment=Alignment.CenterVertically) {
+            Text("${current.size} 条记录",Modifier.weight(1f),style=MaterialTheme.typography.labelMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)
+            TextButton(onClick={model.clearTaskRecords(current.map(TaskRecord::id))},enabled=current.any {it.clearable}) {
+                Text("清除已结束")
+            }
+        }
         AnimatedContent(filter,modifier=Modifier.weight(1f),
             transitionSpec={PageMotion.between(0,0,0).using(null)},label="task filter") {shownFilter ->
             val visible=remember(tasks,shownFilter) {
-                tasks.filter {when(shownFilter){1 ->it.status in setOf("queued","running");2 ->it.status in setOf("failed","cancelled");else ->true}}.sortedWith(taskQueueOrder)
+                filteredTasks(tasks,shownFilter)
             }
             AnimatedTaskQueue(visible,tasks,model,onOpen,onOutput,when(shownFilter){1 ->"没有进行中的任务";2 ->"没有未完成任务";else ->"暂无任务"})
         }
     }
 }
+
+private fun filteredTasks(tasks: List<TaskRecord>,filter: Int) = tasks.filter {
+    when(filter) {1 ->it.status in setOf("queued","running");2 ->it.status in setOf("failed","cancelled");else ->true}
+}.sortedWith(taskQueueOrder)
 
 @Composable
 private fun AnimatedTaskQueue(tasks: List<TaskRecord>,allTasks: List<TaskRecord>,model: KeyeViewModel,onOpen: (String) -> Unit,onOutput: (String) -> Unit,emptyLabel: String) {
@@ -68,14 +79,14 @@ private fun AnimatedTaskQueue(tasks: List<TaskRecord>,allTasks: List<TaskRecord>
             // with lazy animateItem placement would repeatedly retarget neighbours.
             AnimatedVisibility(transition,enter=slideInHorizontally(tween(240,easing=FastOutSlowInEasing)){it/6}+fadeIn(tween(180))+expandVertically(tween(240,easing=FastOutSlowInEasing),expandFrom=Alignment.Top),
                 exit=slideOutHorizontally(tween(220,easing=FastOutSlowInEasing)){it/4}+fadeOut(tween(170))+shrinkVertically(tween(260,delayMillis=40,easing=FastOutSlowInEasing),shrinkTowards=Alignment.Top)) {
-                TaskRow(record,{model.cancelTask(record.id)},{model.retryTask(record.id)},onOpen,onOutput)
+                TaskRow(record,{model.cancelTask(record.id)},{model.retryTask(record.id)},onOpen,onOutput,{model.clearTaskRecords(listOf(record.id))})
             }
         }
     }
 }
 
 @Composable
-private fun TaskRow(task: TaskRecord,onCancel: () -> Unit,onRetry: () -> Unit,onOpen: (String) -> Unit,onOutput: (String) -> Unit,modifier: Modifier=Modifier) {
+private fun TaskRow(task: TaskRecord,onCancel: () -> Unit,onRetry: () -> Unit,onOpen: (String) -> Unit,onOutput: (String) -> Unit,onClear: () -> Unit,modifier: Modifier=Modifier) {
     val active=task.status in setOf("queued","running")
     val retryable=task.type in setOf("download","import")
     val failed=task.status=="failed"
@@ -116,6 +127,7 @@ private fun TaskRow(task: TaskRecord,onCancel: () -> Unit,onRetry: () -> Unit,on
                         else -> IconButton(onClick={details=true}){AppIcon("info","任务详情",Modifier.size(20.dp))}
                     }
                 }
+                if(task.clearable) IconButton(onClick=onClear) {AppIcon("trash","清除记录",Modifier.size(20.dp))}
             }
             HorizontalDivider(Modifier.padding(start=66.dp),thickness=.5.dp,color=MaterialTheme.colorScheme.outlineVariant.copy(alpha=.5f))
         }
@@ -125,5 +137,6 @@ private fun TaskRow(task: TaskRecord,onCancel: () -> Unit,onRetry: () -> Unit,on
             Text("$type · $status · $date",style=MaterialTheme.typography.bodySmall,color=color)
             if(task.message.isNotBlank()) Text(task.message,style=MaterialTheme.typography.bodyMedium)
         }
-    },confirmButton={TextButton(onClick={details=false}){Text("关闭")}})
+    },confirmButton={TextButton(onClick={details=false}){Text("关闭")}},
+        dismissButton={if(task.clearable) TextButton(onClick={details=false;onClear()}) {Text("清除记录")}})
 }

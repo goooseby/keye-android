@@ -1,6 +1,10 @@
 package io.github.goooseby.keye
 
 import io.github.goooseby.keye.update.StableVersion
+import io.github.goooseby.keye.update.AppRelease
+import io.github.goooseby.keye.update.UPDATE_MIRROR_ORIGIN
+import io.github.goooseby.keye.update.mirrorAssetPath
+import io.github.goooseby.keye.update.preferredRelease
 import io.github.goooseby.keye.update.matchingUpdateSigners
 import io.github.goooseby.keye.update.shouldCheckUpdateToday
 import io.github.goooseby.keye.update.validUpdateUrl
@@ -44,4 +48,45 @@ class UpdatePolicyTest {
         assertFalse(matchingUpdateSigners(setOf("debug"),setOf("release")))
         assertFalse(matchingUpdateSigners(setOf("A","B"),setOf("A")))
     }
+
+    @Test fun matchingMirrorIsPreferredAndMismatchedPackageStaysOnGitHub() {
+        val github=release("0.3.4")
+        val mirror=release("0.3.4",mirror=true)
+        val chosen=preferredRelease(mirror,github)!!
+        assertEquals(mirror.mirrorUrl,chosen.mirrorUrl)
+        assertEquals(github.fileKey,chosen.fileKey)
+        assertEquals(github.notes,chosen.notes)
+        assertEquals(github,preferredRelease(mirror.copy(sha256="b".repeat(64)),github))
+        assertEquals(github,preferredRelease(mirror.copy(size=2),github))
+    }
+
+    @Test fun latestPublishedVersionWinsAndEitherSourceWorksAlone() {
+        val mirror=release("0.3.4",mirror=true)
+        val github=release("0.3.5")
+        assertEquals(github,preferredRelease(mirror,github))
+        val newerMirror=release("0.10.0",mirror=true)
+        assertEquals(newerMirror,preferredRelease(newerMirror,github))
+        assertEquals(mirror,preferredRelease(mirror,null))
+        assertEquals(github,preferredRelease(null,github))
+        assertNull(preferredRelease(null,null))
+    }
+
+    @Test fun mirrorAndGitHubAssetUrlsAreBoundToTheExactVersion() {
+        val github=release("0.3.4")
+        assertThrows(IllegalArgumentException::class.java) {
+            AppRelease.checked(1,"0.3.5",github.url,github.size,github.sha256,"")
+        }
+        listOf("https://other.example"+mirrorAssetPath("0.3.4"), UPDATE_MIRROR_ORIGIN+mirrorAssetPath("0.3.5")).forEach {url ->
+            assertThrows(IllegalArgumentException::class.java) {
+                AppRelease.checked(0,github.version,github.url,github.size,github.sha256,"",url)
+            }
+        }
+    }
+
+    private fun release(version: String,mirror: Boolean=false) = AppRelease.checked(
+        if(mirror) 0 else 123,version,
+        "https://github.com/goooseby/keye-android/releases/download/v$version/keye-android.apk",
+        1,"a".repeat(64),if(mirror) "" else "更新说明",
+        if(mirror) UPDATE_MIRROR_ORIGIN+mirrorAssetPath(version) else null
+    )
 }

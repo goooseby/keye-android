@@ -4,6 +4,7 @@ import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -11,6 +12,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -18,6 +20,21 @@ import io.github.goooseby.keye.ui.components.AppIcon
 import io.github.goooseby.keye.ui.components.SectionLabel
 import io.github.goooseby.keye.ui.components.featureColor
 import kotlin.math.roundToInt
+
+@Composable
+internal fun BlackBorderSwitch(enabled: Boolean, onChange: (Boolean) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 48.dp).toggleable(enabled, role = Role.Switch, onValueChange = onChange),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Text("智能去黑边", style = MaterialTheme.typography.bodyMedium)
+            Text("阅读、保存和导出时裁去明显黑边", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Switch(checked = enabled, onCheckedChange = null)
+    }
+}
 
 /** Controls stay above the page: showing them never changes the slide viewport. */
 @Composable

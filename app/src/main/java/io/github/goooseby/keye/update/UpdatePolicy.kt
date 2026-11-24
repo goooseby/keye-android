@@ -5,6 +5,8 @@ import java.time.LocalDate
 
 internal const val UPDATE_REPOSITORY="goooseby/keye-android"
 internal const val UPDATE_APK_NAME="keye-android.apk"
+internal const val UPDATE_MIRROR_ORIGIN="https://keye.kovra.top"
+internal const val UPDATE_MIRROR_MANIFEST="$UPDATE_MIRROR_ORIGIN/downloads/releases.json"
 internal const val UPDATE_ACTION="io.github.goooseby.keye.SHOW_UPDATES"
 internal const val UPDATE_NOTIFICATION_ID=4201
 
@@ -35,3 +37,15 @@ internal fun validUpdateUrl(value: String): Boolean = runCatching {
 }.getOrDefault(false)
 
 internal fun matchingUpdateSigners(current: Set<String>,candidate: Set<String>): Boolean = current.isNotEmpty() && current==candidate
+
+internal fun mirrorAssetPath(version: String) = "/downloads/android/v${version.removePrefix("v")}/$UPDATE_APK_NAME"
+
+internal fun preferredRelease(mirror: AppRelease?, github: AppRelease?): AppRelease? {
+    if (mirror == null) return github
+    if (github == null) return mirror
+    val comparison = StableVersion.parse(mirror.version)!!.compareTo(StableVersion.parse(github.version)!!)
+    if (comparison > 0) return mirror
+    return if (comparison == 0 && mirror.size == github.size && mirror.sha256 == github.sha256) {
+        github.copy(mirrorUrl = mirror.mirrorUrl, notes = github.notes.ifBlank { mirror.notes })
+    } else github
+}

@@ -11,7 +11,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
@@ -19,13 +18,16 @@ internal data class AppUpdateState(
     val version: String="",val automatic: Boolean=true,val checking: Boolean=false,val initializing: Boolean=true,
     val release: AppRelease?=null,val download: UpdateDownload=UpdateDownload(),
     val panelOpen: Boolean=false,val prompt: Boolean=false,val message: String?=null,
-    val preparingInstall: Boolean=false,val autoInstallPending: Boolean=false,val installer: Intent?=null
-)
+    val preparingInstall: Boolean=false,val autoInstallPending: Boolean=false,val installer: Intent?=null,
+    val readVersion: String?=null
+) {
+    val unreadRelease get()=release?.let {it.version!=readVersion}==true
+}
 
 internal class AppUpdateViewModel(application: Application): AndroidViewModel(application) {
     private val manager=AppUpdateManager(application)
-    private val lock=Mutex()
-    private val mutable=MutableStateFlow(AppUpdateState(version=manager.currentVersion,automatic=manager.autoEnabled()))
+    private val lock=updateOperationLock
+    private val mutable=MutableStateFlow(AppUpdateState(version=manager.currentVersion,automatic=manager.autoEnabled(),readVersion=manager.readVersion()))
     val state=mutable.asStateFlow()
     init {
         viewModelScope.launch {
@@ -45,21 +47,26 @@ internal class AppUpdateViewModel(application: Application): AndroidViewModel(ap
     fun markPromptShown() {manager.prefs.edit().putString("last_prompt_day",LocalDate.now().toString()).apply()}
     fun showDetails() {mutable.update {it.copy(panelOpen=true,prompt=false)}}
     fun dismiss() {mutable.update {it.copy(panelOpen=false,prompt=false,message=null)}}
-    fun ignoreVersion() {state.value.release?.let {manager.ignore(it.version)};dismiss()}
+    fun ignoreVersion() {state.value.release?.let {manager.ignore(it.version);markReleaseRead(it.version)};dismiss()}
+    fun markReleaseRead(version: String) {
+        if(state.value.readVersion==version) return
+        manager.markRead(version)
+        mutable.update {it.copy(readVersion=version)}
+    }
     fun setAutomatic(value: Boolean) {manager.setAutoEnabled(value);mutable.update {it.copy(automatic=value,prompt=if(value) it.prompt else false)}}
     fun check(manual: Boolean=true) {
         if(state.value.checking) return
         mutable.update {it.copy(checking=true,message=null)}
         viewModelScope.launch {
             try {
-                val release=withContext(Dispatchers.IO) {lock.withLock {manager.fetchLatest(manual)}}
+                val release=withContext(Dispatchers.IO) {manager.fetchLatest(manual)}
                 mutable.update {old ->
                     val pinned=old.download.stage in setOf(UpdateDownloadStage.Downloading,UpdateDownloadStage.Ready)
                     val chosen=if(pinned) old.release else release
                     val canPrompt=!manual && chosen!=null && manager.autoEnabled() && !manager.ignored(chosen.version) &&
                         manager.prefs.getString("last_prompt_day",null)!=LocalDate.now().toString()
                     old.copy(checking=false,release=chosen,
-                        download=if(pinned || chosen?.assetId==old.release?.assetId) old.download else UpdateDownload(),
+                        download=if(pinned || chosen?.fileKey==old.release?.fileKey) old.download else UpdateDownload(),
                         prompt=canPrompt && old.download.stage==UpdateDownloadStage.Idle,
                         message=if(manual && chosen==null) "当前没有可安装的新版本" else null)
                 }

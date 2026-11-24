@@ -61,6 +61,7 @@ import io.github.goooseby.keye.ui.reader.ClassroomScreen
 import io.github.goooseby.keye.ui.reader.ReaderScreen
 import io.github.goooseby.keye.announcements.AppMessagesHost
 import io.github.goooseby.keye.announcements.AnnouncementViewModel
+import io.github.goooseby.keye.announcements.MessageInboxButton
 import io.github.goooseby.keye.update.AppUpdateViewModel
 import io.github.goooseby.keye.update.UPDATE_ACTION
 import io.github.goooseby.keye.update.UpdateDownloadStage
@@ -100,6 +101,7 @@ private fun KeyeApp(model: KeyeViewModel,mediaPath: (String) -> File,updates: Ap
     val announcementState by announcements.state.collectAsState()
     val state by model.state.collectAsState()
     val updateState by updates.state.collectAsState()
+    val unreadMessages=announcementState.unreadCount + if(updateState.unreadRelease) 1 else 0
     val context=LocalContext.current
     val screens=rememberSaveableStateHolder()
     var section by rememberSaveable{mutableStateOf(Section.Timetable)}
@@ -198,11 +200,18 @@ private fun KeyeApp(model: KeyeViewModel,mediaPath: (String) -> File,updates: Ap
     }
     val prepared=state.materials.firstOrNull {it.sourceKey==requestedLesson?.id && !it.deleted && it.pages.isNotEmpty()}
     LaunchedEffect(prepared?.id) {if(prepared!=null && requestedLesson!=null) {materialId=prepared.id;pendingLesson=null;pendingStarted=false}}
-    LaunchedEffect(state.notice) {state.notice?.let{snackbar.showSnackbar(it);if(model.state.value.notice==it) model.notice(null)}}
+    LaunchedEffect(state.notice,state.noticeVersion) {
+        val message=state.notice ?: return@LaunchedEffect
+        val version=state.noticeVersion
+        snackbar.currentSnackbarData?.dismiss()
+        snackbar.showSnackbar(message)
+        model.dismissNotice(message,version)
+    }
     AppMessagesHost(updates,announcements,canPrompt=section in setOf(Section.Timetable,Section.Library) && state.courseAcquisition==null && courseId==null && pendingLesson==null && pendingClassroom==null && !chooseImportCourse && !classroomOpen && materialId==null && !loginOpen && exportIds.isEmpty() && !state.loading)
     if(exportIds.isNotEmpty()) {
+        val trimBlackBorders by model.trimBlackBorders.collectAsState()
         val materials=exportIds.mapNotNull { id ->state.materials.firstOrNull { it.id==id } }
-        if(materials.isNotEmpty()) ExportSheet(materials,shareOnly,onDismiss={exportIds=emptyList()},onSubmit={model.export(it.copy(origin=materialId?:section.name));exportIds=emptyList()})
+        if(materials.isNotEmpty()) ExportSheet(materials,shareOnly,trimBlackBorders=trimBlackBorders,onDismiss={exportIds=emptyList()},onSubmit={model.export(it.copy(origin=materialId?:section.name),trimBlackBorders);exportIds=emptyList()})
     }
     if(pendingClassroom!=null) AlertDialog(onDismissRequest={pendingClassroom=null},title={Text("切换课堂跟看？")},text={Text("当前已获取的页面和批注会保留。")},confirmButton={TextButton(onClick={pendingClassroom?.let {if(model.startClassroom(it)) classroomOpen=true};pendingClassroom=null}) {Text("切换并保留")}},dismissButton={TextButton(onClick={pendingClassroom=null}) {Text("取消")}})
     LaunchedEffect(classroomOpen,loginOpen,state.loggedIn,state.classroom?.stage) {
@@ -248,6 +257,7 @@ private fun KeyeApp(model: KeyeViewModel,mediaPath: (String) -> File,updates: Ap
                                         if(route.section in setOf(Section.Timetable,Section.Acquire) && route.course==null) IconButton(onClick={tasksOrigin=route.section;section=Section.Tasks}) {
                                             BadgedBox(badge={val active=state.tasks.count {it.status in setOf("queued","running")};if(active>0) Badge {Text(active.toString())}}) {AppIcon("tasks","下载管理")}
                                         }
+                                        if(route.depth==0) MessageInboxButton(unreadMessages,announcements::showBoard)
                                     }
                                 }
                             },
@@ -288,7 +298,7 @@ private fun KeyeApp(model: KeyeViewModel,mediaPath: (String) -> File,updates: Ap
                                                 UpdateDownloadStage.Downloading ->updateState.download.message
                                                 UpdateDownloadStage.Ready ->"${updateState.release?.version} 已下载，点击安装"
                                                 else ->updateState.release?.let {"发现新版本 ${it.version}"}
-                                        },onAnnouncements=announcements::showBoard,announcementUnread=announcementState.unreadCount)
+                                        })
                                     }
                                 }
                             }

@@ -14,6 +14,11 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import io.github.goooseby.keye.MainActivity
 import io.github.goooseby.keye.R
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
 
 /** Completion never launches an activity from the background. */
 class UpdateDownloadReceiver: BroadcastReceiver() {
@@ -25,9 +30,17 @@ class UpdateDownloadReceiver: BroadcastReceiver() {
         if(id<0 || id!=prefs.getLong("download_id",-1) || prefs.getLong("notified_download_id",-1)==id) return
         try {
             val downloads=context.getSystemService(DownloadManager::class.java)
-            downloads.query(DownloadManager.Query().setFilterById(id))?.use {
-                if(!it.moveToFirst() || it.getInt(it.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))!=DownloadManager.STATUS_SUCCESSFUL) return
+            val status=downloads.query(DownloadManager.Query().setFilterById(id))?.use {
+                if(!it.moveToFirst()) return
+                it.getInt(it.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
             } ?: return
+            if(status==DownloadManager.STATUS_FAILED) {
+                if(prefs.getString("download_url",null)?.startsWith("$UPDATE_MIRROR_ORIGIN/")==true) {
+                    retryMirrorDownload(context.applicationContext, id)
+                }
+                return
+            }
+            if(status!=DownloadManager.STATUS_SUCCESSFUL) return
             if(Build.VERSION.SDK_INT>=33 && ContextCompat.checkSelfPermission(context,Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED) return
             val manager=context.getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(NotificationChannel("app_updates","应用更新",NotificationManager.IMPORTANCE_DEFAULT))
@@ -38,5 +51,27 @@ class UpdateDownloadReceiver: BroadcastReceiver() {
                 .setContentText("点击校验并安装，无需重新下载").setContentIntent(pending).setAutoCancel(true).build())
             prefs.edit().putLong("notified_download_id",id).apply()
         } catch(_: Exception) { /* The next foreground refresh can still recover it. */ }
+    }
+
+    private fun retryMirrorDownload(context: Context, id: Long) {
+        val completion = goAsync()
+        val scope = CoroutineScope(Dispatchers.IO)
+        scope.launch {
+            try {
+                withTimeoutOrNull(5_000L) {
+                    updateOperationLock.withLock {
+                        val manager = AppUpdateManager(context)
+                        val activeId = manager.prefs.getLong("download_id", -1)
+                        if (activeId == id && manager.autoInstall()) {
+                            manager.savedRelease()?.let { manager.refresh(it) }
+                        }
+                    }
+                }
+            } catch (_: Exception) {
+                // Foreground refresh can recover the task.
+            } finally {
+                completion.finish()
+            }
+        }
     }
 }

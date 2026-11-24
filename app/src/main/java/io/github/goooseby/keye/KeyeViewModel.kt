@@ -22,11 +22,11 @@ import io.github.goooseby.keye.data.StudyMaterial
 import io.github.goooseby.keye.data.TaskRecord
 import io.github.goooseby.keye.data.mergeTaskBatch
 import io.github.goooseby.keye.data.newId
+import io.github.goooseby.keye.data.outputPageBitmap
 import io.github.goooseby.keye.data.renderReadingPage
 import io.github.goooseby.keye.data.strings
 import io.github.goooseby.keye.data.taskQueueOrder
 import io.github.goooseby.keye.data.textOrNull
-import io.github.goooseby.keye.data.withPageNote
 import io.github.goooseby.keye.domain.ClassroomPage
 import io.github.goooseby.keye.domain.ClassroomPageSource
 import io.github.goooseby.keye.domain.ClassroomSession
@@ -100,6 +100,7 @@ data class UiState(
     val schoolConnection: SchoolConnection = SchoolConnection.SignedOut,
     val busy: Boolean = false,
     val notice: String? = null,
+    val noticeVersion: Long = 0,
     val startDate: String = LocalDate.now().minusDays(14).toString(),
     val endDate: String = LocalDate.now().toString()
 )
@@ -130,6 +131,7 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
     private var scanJob: Job? = null
     private val scanSequence = java.util.concurrent.atomic.AtomicLong()
     private val jobs = ConcurrentHashMap<String, Job>()
+    private val taskRecordLock = Any()
     private val downloadSlots = Semaphore(2)
     private val importSlots = Semaphore(1)
     private val queuedSources = ConcurrentHashMap.newKeySet<String>()
@@ -141,8 +143,16 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
     private val classroomGeneration=java.util.concurrent.atomic.AtomicLong()
     @Volatile private var classroomForeground=false
     private val classroomWake=kotlinx.coroutines.channels.Channel<Unit>(kotlinx.coroutines.channels.Channel.CONFLATED)
+    private val readingPrefs=application.getSharedPreferences("reading",0)
+    private val mutableTrimBlackBorders=MutableStateFlow(readingPrefs.getBoolean("trimBlackBorders",true))
+    internal val trimBlackBorders=mutableTrimBlackBorders.asStateFlow()
     private val mutableState = MutableStateFlow(UiState())
     val state = mutableState.asStateFlow()
+
+    internal fun setTrimBlackBorders(enabled: Boolean) {
+        readingPrefs.edit().putBoolean("trimBlackBorders",enabled).apply()
+        mutableTrimBlackBorders.value=enabled
+    }
 
     init {
         viewModelScope.launch(Dispatchers.IO) {
@@ -206,7 +216,11 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
     }
 
     fun notice(message: String?) {
-        mutableState.update { it.copy(notice = message) }
+        mutableState.update { it.copy(notice = message, noticeVersion = it.noticeVersion + if (message == null) 0 else 1) }
+    }
+
+    fun dismissNotice(message: String, version: Long) {
+        mutableState.update { if (it.notice == message && it.noticeVersion == version) it.copy(notice = null) else it }
     }
 
     suspend fun login(cookie: String): SchoolLoginResult {
@@ -577,7 +591,7 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
                                         val legacy=legacyHashes.entries.firstOrNull {(source,oldHash) ->oldHash==hash && latest.pages.any {it.source==source && it.remoteKey==null}}?.key
                                         val changed=if(legacy!=null) latest.copy(pages=latest.pages.map {page ->if(page.source==legacy) page.copy(remoteKey=remote.key) else page})
                                             else {
-                                                created=media.classroomImage(latest.id,remote.key,bytes)
+                                                created=media.classroomImage(latest.id,remote.key,bytes,prepareReadingBorders=trimBlackBorders.value)
                                                 insertClassroomPage(latest,created!!,catalog)
                                             }
                                         coroutineContext.ensureActive()
@@ -831,13 +845,25 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
         }
     }
 
-    private fun putTask(task: TaskRecord) {
+    private fun putTask(task: TaskRecord, create: Boolean = false): Boolean = synchronized(taskRecordLock) {
+        // Late completion/cancellation must not recreate a record the user cleared.
+        if (!create && store.task(task.id) == null) return@synchronized false
         val updated = task.copy(updatedAt = System.currentTimeMillis())
         store.put(updated)
         mutableState.update { current ->
             current.copy(tasks = (current.tasks.filterNot { it.id == updated.id } + updated)
                 .sortedWith(taskQueueOrder))
         }
+        true
+    }
+
+    fun clearTaskRecords(ids: List<String>) = action {
+        val removed = synchronized(taskRecordLock) {
+            store.removeTaskRecords(ids).also { removed ->
+                mutableState.update { it.copy(tasks = it.tasks.filterNot { task -> task.id in removed }) }
+            }
+        }
+        if (removed.isNotEmpty()) notice("已清除 ${removed.size} 条任务记录")
     }
 
     private fun legacyHashes(material: StudyMaterial): Map<String,List<Byte>> = material.pages.filter {it.remoteKey==null}.mapNotNull {page ->
@@ -980,7 +1006,7 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
             }
             val uris = payload.optJSONArray("uris")?.strings()?.map(Uri::parse).orEmpty()
             if (uris.isEmpty()) { notice("请重新选择文件导入"); return }
-            queueImport(task, uris, payload.textOrNull("courseId"))
+            queueImport(task, uris, payload.textOrNull("courseId"), create = false)
             return
         }
         if (task.type != "download") return
@@ -999,7 +1025,7 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
         }
         val job = viewModelScope.launch(Dispatchers.IO, start = CoroutineStart.LAZY) {
             try {
-                putTask(task.copy(status = "queued", progress = 0, message = "等待下载"))
+                if (!putTask(task.copy(status = "queued", progress = 0, message = "等待下载"))) return@launch
                 downloadSlots.withPermit {
                         downloadTask(task, entry, source, allowUnfiled)
                     }
@@ -1031,7 +1057,7 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
         }
     }
 
-    private fun queueImport(record: TaskRecord, uris: List<Uri>, courseId: String?) {
+    private fun queueImport(record: TaskRecord, uris: List<Uri>, courseId: String?, create: Boolean = true) {
         if (jobs.containsKey(record.id)) return
         synchronized(courseGate) {
             if (courseId != null && store.courses().none { it.id == courseId && it.active }) {
@@ -1048,7 +1074,7 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
             var committed = false
             var acquired = false
             try {
-                putTask(task.copy(status = "queued", message = "等待导入"))
+                if (!putTask(task.copy(status = "queued", message = "等待导入"), create)) return@launch
                 importSlots.acquire()
                 acquired = true
                 putTask(task.copy(status = "running", message = "正在导入"))
@@ -1090,20 +1116,27 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
     }
 
     private var exportJob: Job? = null
-    private var lastExportRequest: ExportRequest?=null
-    fun retryExport() {lastExportRequest?.let {export(it)}}
+    private var lastExportRequest: Pair<ExportRequest, Boolean>?=null
+    fun retryExport() {lastExportRequest?.let {(request,trimBorders) -> export(request,trimBorders)}}
+
+    private fun renderPageForOutput(material: StudyMaterial, page: Int, trimBorders: Boolean): android.graphics.Bitmap {
+        val source = material.pages.getOrNull(page - 1) ?: error("页码无效")
+        val file = media.file(source.source)
+        val bitmap = renderReadingPage(file, source.pdfPage, 2400) ?: error("无法读取页面")
+        return outputPageBitmap(file, source.pdfPage, bitmap, trimBorders, material.pageNotes[page].orEmpty())
+    }
     fun sharePage(id: String,page: Int) {
         val captured=state.value.materials.firstOrNull {it.id==id}
+        val trimBorders=trimBlackBorders.value
         if(exportJob?.isActive==true) {notice("正在准备文件，请稍候");return}
         mutableState.update {it.copy(exportState=ExportState(running=true,message="正在准备当前页"))}
         exportJob=viewModelScope.launch(Dispatchers.IO) {
             var imageFile: File?=null
             try {
                 val material=captured ?: store.material(id) ?: error("课件不存在")
-                val source=material.pages.getOrNull(page-1) ?: error("页码无效")
                 val directory=File(getApplication<Application>().cacheDir,"shared/${newId()}").apply {mkdirs()}
                 imageFile=File(directory,"${material.title.replace(Regex("""[\/:*?"<>|]"""),"_").take(80)}_第${page}页.png")
-                val bitmap=withPageNote(renderReadingPage(media.file(source.source),source.pdfPage,2400) ?: error("无法读取页面"),material.pageNotes[page].orEmpty())
+                val bitmap=renderPageForOutput(material,page,trimBorders)
                 try {imageFile.outputStream().use {bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG,100,it)}} finally {bitmap.recycle()}
                 coroutineContext.ensureActive()
                 val app=getApplication<Application>()
@@ -1116,14 +1149,14 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
     fun savePageImage(id: String,page: Int,chosenUri: Uri?=null,snapshot: StudyMaterial?=null) {
         if(exportJob?.isActive==true) {notice("正在准备文件，请稍候");return}
         val captured=snapshot ?: state.value.materials.firstOrNull {it.id==id}
+        val trimBorders=trimBlackBorders.value
         mutableState.update {it.copy(exportState=ExportState(running=true,message="正在保存当前页"))}
         exportJob=viewModelScope.launch(Dispatchers.IO) {
             val app=getApplication<Application>()
             var created:Uri?=null
             try {
                 val material=captured ?: store.material(id) ?: error("课件不存在")
-                val source=material.pages.getOrNull(page-1) ?: error("页码无效")
-                val bitmap=withPageNote(renderReadingPage(media.file(source.source),source.pdfPage,2400) ?: error("无法读取页面"),material.pageNotes[page].orEmpty())
+                val bitmap=renderPageForOutput(material,page,trimBorders)
                 val name=material.title.replace(Regex("""[\/:*?"<>|]"""),"_").take(70)+"_第${page}页.png"
                 try {
                     if(android.os.Build.VERSION.SDK_INT>=29 && chosenUri==null) {
@@ -1148,9 +1181,9 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
     fun consumeShare() {mutableState.update { it.copy(exportState=it.exportState?.copy(autoShare=false)) }}
     fun clearExport() { mutableState.update { it.copy(exportState=null) } }
     fun cancelExport() { exportJob?.cancel() }
-    fun export(request: ExportRequest) {
+    fun export(request: ExportRequest, trimBorders: Boolean = trimBlackBorders.value) {
         if(exportJob?.isActive==true) return
-        lastExportRequest=request
+        lastExportRequest=request to trimBorders
         mutableState.update { it.copy(exportState=ExportState(running=true,message="正在准备 PDF")) }
         exportJob=viewModelScope.launch(Dispatchers.IO) {
             var staged: File?=null
@@ -1159,8 +1192,8 @@ class KeyeViewModel @JvmOverloads constructor(application: Application,private v
                 require(materials.none { it.deleted } && materials.isNotEmpty()) { "课件已移至回收站" }
                 staged=File.createTempFile("shared-", ".pdf", File(getApplication<Application>().cacheDir,"shared").apply { mkdirs() })
                 val exportContext=coroutineContext
-                staged.outputStream().use { out -> media.export(materials,out,request.pages,request.includeNotes) { current,total ->
-                    exportContext.ensureActive()
+                staged.outputStream().use { out -> media.export(materials,out,request.pages,request.includeNotes,
+                    trimBlackBorders=trimBorders,checkCancellation={exportContext.ensureActive()}) { current,total ->
                     mutableState.update { it.copy(exportState=ExportState(running=true,progress=current.toFloat()/total,message="正在生成 $current / $total 页")) }
                 } }
                 coroutineContext.ensureActive()
